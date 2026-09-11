@@ -23,8 +23,15 @@ if (!chromium) {
 }
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const PAGE = pathToFileURL(join(ROOT, 'docs/index.html')).href;
-if (!existsSync(join(ROOT, 'docs/index.html'))) { console.error('build first: npm run build'); process.exit(1); }
+
+/* AG_PAGE points the whole suite at a deployed copy instead of the local build,
+   so the same checks that gate a commit can gate a release:
+     AG_PAGE=https://knight-ai-av.github.io/alpha-grab/ node tests/browser.mjs
+   A deploy can serve HTTP 200 and still be the wrong bytes, an empty shell or a
+   stale cache. Only running the real checks against the real URL rules that out. */
+const PAGE = process.env.AG_PAGE || pathToFileURL(join(ROOT, 'docs/index.html')).href;
+if (!process.env.AG_PAGE && !existsSync(join(ROOT, 'docs/index.html'))) { console.error('build first: npm run build'); process.exit(1); }
+console.log('\x1b[2mtarget: ' + PAGE + '\x1b[0m');
 
 let failed = 0, passed = 0;
 const is = (c, m, extra) => { c ? (passed++, console.log('  \x1b[32m✓\x1b[0m ' + m)) : (failed++, console.log('  \x1b[31m✗ ' + m + (extra ? ' — ' + extra : '') + '\x1b[0m')); };

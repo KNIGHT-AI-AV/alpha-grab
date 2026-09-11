@@ -105,14 +105,22 @@ keeps the tree describing what is actually live.
 This is served from more than one place, and they drift independently. Before saying
 "it is live", say *where*:
 
-| URL | Role | Source |
-|---|---|---|
-| `knightaiav.com/alpha-grab/` | what people visit | `docs/` copied into the site |
-| GitHub Pages (`/docs` on the default branch) | public mirror and permalink | this repo |
-| `docs/index.html` on disk | show-laptop copy, works offline | this repo |
+| URL | Role | Source | State |
+|---|---|---|---|
+| [knight-ai-av.github.io/alpha-grab](https://knight-ai-av.github.io/alpha-grab/) | the permalink | `/docs` on `main` | **live** |
+| `knightaiav.com/alpha-grab/` | what people visit | `docs/` copied into the site | awaiting one deploy |
+| `docs/index.html` on disk | show-laptop copy, works offline | this repo | works now |
 
 Deploying is copying `docs/` — there is no build step on the host, no Actions workflow
 and nothing to install.
+
+**Gate a deploy with the real checks, not a 200.** A deploy can answer, and still be the
+wrong bytes, an empty shell, or a stale cache. `AG_PAGE` points the browser suite at a
+deployed copy, so the checks that gate a commit also gate a release:
+
+```
+AG_PAGE=https://knight-ai-av.github.io/alpha-grab/ node tests/browser.mjs
+```
 
 ---
 
