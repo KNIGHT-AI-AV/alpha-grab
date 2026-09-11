@@ -13,6 +13,8 @@ const AG = window.AG = {
   MIN_DIM: 16,
   MAX_BATCH: 50,          // URLs per batch run
   SETTLE_MAX: 30000,      // ms an HTML template may run before capture
+  MAX_INSTANCES: 8,       // live graphics running at once in the multiviewer
+  STEP_FPS: 25,           // frame size the transport steps by, in fps
 
   /* Output formats offered in the export bar. */
   FORMATS: [

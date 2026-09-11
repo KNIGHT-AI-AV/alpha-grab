@@ -89,7 +89,13 @@ async function rasterise(src, W, H, opts, onNote){
     src.w = clamp(Math.round(opts.domW || 1920), 16, 16384);
     src.h = clamp(Math.round(opts.domH || 1080), 16, 16384);
     const box = placement(src.w, src.h, W, H, opts.fitMode);
-    const svg = await captureDom(src, opts.settle, onNote);
+    /* A template that is running as a live instance is grabbed FROM that
+       instance, so the exported frame is the one the monitor is showing.
+       Without an instance (a dropped .html file, a batch run) fall back to the
+       one-shot capture, which loads its own throwaway iframe. */
+    const svg = src.inst && src.inst.ready
+      ? await grabInstance(src.inst, onNote)
+      : await captureDom(src, opts.settle, onNote);
     const img = await svgToImage(svg, Math.max(1, Math.round(box.w)), Math.max(1, Math.round(box.h)));
     c.drawImage(img, box.x, box.y, box.w, box.h);
   } else {

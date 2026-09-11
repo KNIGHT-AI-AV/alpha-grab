@@ -306,3 +306,49 @@ dialog td:first-child{font-family:var(--mono);color:var(--gold);white-space:nowr
   .stage-bottom,.stage-top{gap:6px}
 }
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+/* ══════════════════ multiviewer + transport ══════════════════
+   Tiles hold the template's own running iframe. The iframe keeps its DESIGN
+   size and is scaled with a transform, so the template never reflows to the
+   tile — monitoring a layout you are not going to export is worse than
+   showing nothing. */
+.mv{position:absolute;inset:0;display:flex;flex-direction:column;overflow:auto;padding:14px;gap:14px;background:var(--bg)}
+/* Grab mode hides the multiviewer with VISIBILITY, never display:none or
+   [hidden]. The instances live in here, and an element with no layout box has
+   no computed geometry — the repaint would read a DOM where every element is
+   0x0 and export an empty frame. Measured: it did exactly that. */
+.mv.off{visibility:hidden;pointer-events:none}
+.mv-grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));align-content:start}
+.mv-none{margin:auto;text-align:center;max-width:520px;color:var(--ink-2)}
+.mv-none .big{font-size:19px;color:var(--ink);margin-bottom:8px}
+.mv-none p{font-size:13px;line-height:1.65}
+
+.inst{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);overflow:hidden;
+      display:flex;flex-direction:column;transition:border-color .12s,box-shadow .12s}
+.inst.sel{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold-dim)}
+.inst-head{display:flex;align-items:center;gap:8px;padding:6px 8px 6px 10px;border-bottom:1px solid var(--line);
+           background:var(--panel-2);font-size:12px;min-height:32px}
+.inst-name{font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1 1 auto}
+.inst-dim{font-family:var(--mono);font-size:11px;color:var(--ink-3);flex:0 0 auto}
+.inst-x{flex:0 0 auto;background:none;border:0;color:var(--ink-3);cursor:pointer;font-size:15px;line-height:1;padding:2px 5px;border-radius:4px}
+.inst-x:hover{color:var(--red);background:#ffffff0d}
+
+/* The checkerboard reads through the graphic's own alpha — the tile shows what
+   the frame actually is, not the graphic flattened onto a guess. */
+.inst-view{position:relative;overflow:hidden;cursor:pointer;background-color:#11161c;
+  background-image:linear-gradient(45deg,#191f26 25%,transparent 25%),linear-gradient(-45deg,#191f26 25%,transparent 25%),
+                   linear-gradient(45deg,transparent 75%,#191f26 75%),linear-gradient(-45deg,transparent 75%,#191f26 75%);
+  background-size:16px 16px;background-position:0 0,0 8px,8px -8px,-8px 0}
+.inst-frame{position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:none}
+
+.inst-badge{position:absolute;right:6px;top:6px;z-index:2;font-family:var(--mono);font-size:10px;letter-spacing:.5px;
+            padding:2px 6px;border-radius:3px;background:#000000a6;color:var(--ink-2);backdrop-filter:blur(3px)}
+.inst-badge.live{color:#fff;background:#c0392bd9}
+.inst-badge.held{color:#0b0e12;background:var(--amber)}
+.inst-badge.scripted{color:#0b0e12;background:var(--cyan)}
+
+.transport{display:flex;align-items:center;gap:8px;padding:7px 12px;border-top:1px solid var(--line);
+           background:#0d1116cc;backdrop-filter:blur(8px);flex:0 0 auto;overflow-x:auto;scrollbar-width:none}
+.transport::-webkit-scrollbar{display:none}
+.t-name{flex:0 1 auto;min-width:92px;max-width:200px;font-weight:600;font-size:12px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t-time{font-family:var(--mono);font-size:12px;color:var(--ink-2);min-width:62px;text-align:right}

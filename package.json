@@ -1,8 +1,8 @@
 {
   "name": "alphagrab",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "AlphaGrab — pull a high-resolution frame with a real alpha channel out of any URL. Browser-only, for broadcast and AV.",
+  "description": "AlphaGrab - run live HTML graphics locally, watch them switcher-style, and pull any frame with a real alpha channel. Browser-only, for broadcast and AV.",
   "type": "module",
   "scripts": {
     "build": "node build.mjs",

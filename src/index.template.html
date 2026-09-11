@@ -218,6 +218,8 @@
 <!-- ══════════════════════════ stage ══════════════════════════ -->
 <section class="stage">
   <div class="stage-top">
+    <div class="seg" id="segMode" style="min-width:150px"></div>
+    <div class="vsep"></div>
     <div class="seg" id="segView" style="min-width:290px"></div>
     <div class="vsep"></div>
     <span class="lbl" style="letter-spacing:.4px">BG</span>
@@ -255,8 +257,38 @@
       </div>
     </div>
 
+    <!-- Multiviewer: every instance running at once, switcher-style. Each tile
+         is the template's own live iframe scaled down to fit, NOT a snapshot. -->
+    <div class="mv off" id="mv">
+      <div class="mv-grid" id="mvGrid"></div>
+      <div class="mv-none" id="mvNone">
+        <div class="big">No graphics loaded.</div>
+        <p>Paste an HTML template URL above and press <b>Grab</b> — it opens as a running instance you can watch, hold and pull frames from. Up to <b id="maxInst"></b> at once, all rendering locally in this browser.</p>
+      </div>
+    </div>
+
     <div class="dropzone">Drop an image, SVG or HTML file</div>
     <div id="busy"><div class="spinner"></div><div id="busyMsg">Working…</div></div>
+  </div>
+
+  <!-- Transport for the selected instance. Broadcast graphics animate, so
+       landing an exact frame needs a hold and a step, not a lucky click. -->
+  <div class="transport" id="transport" hidden>
+    <span class="t-name" id="tName">—</span>
+    <div class="vsep"></div>
+    <button class="btn sm" id="tStepB" title="Back one frame  ([)">⏴|</button>
+    <button class="btn" id="tPlay" title="Hold / run  (Space)">Hold</button>
+    <button class="btn sm" id="tStepF" title="Forward one frame  (])">|⏵</button>
+    <div class="vsep"></div>
+    <input type="range" id="tScrub" min="0" max="1000" step="1" value="0" class="grow" aria-label="Timeline">
+    <span class="t-time" id="tTime">0.00s</span>
+    <select id="tFps" class="sel sm" aria-label="Step rate" title="Frame rate the step buttons use">
+      <option value="24">24p</option><option value="25" selected>25p</option>
+      <option value="30">30p</option><option value="50">50p</option><option value="60">60p</option>
+    </select>
+    <div class="vsep"></div>
+    <button class="btn" id="tGrab" title="Pull this exact frame into the grabber">Grab frame</button>
+    <button class="btn" id="tGrabAll" title="Pull the current frame from every instance">Grab all</button>
   </div>
 
   <div class="stage-bottom">

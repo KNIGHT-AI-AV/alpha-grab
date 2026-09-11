@@ -27,6 +27,37 @@ you ask for, and hands you a frame whose transparency is real and measured.
 | **HTML graphics template** | Run for real so its scripts execute, given time to settle on its hold frame, then **repainted as native SVG** — so the export is vector and scales to 8K without enlargement |
 | **Local file** | Dropped, pasted or opened — skips every network restriction |
 
+## Live instances
+
+A production switcher does not show you a still of a graphic — it shows you the
+graphic **running**, on its own channel, next to the others. Broadcast HTML
+templates animate, so a one-shot grab of a lower third is usually the wrong frame.
+
+Every HTML template you load stays running in its own instance. Press **`L`** for
+the multiviewer: all of them live and animating at once, on a checkerboard so you
+are reading their real alpha rather than a flatten. Click a tile to work on it.
+
+The transport holds the selected instance and steps it a frame at a time, at
+24/25/30/50/60p, so you can park on the exact frame you want instead of guessing:
+
+| | |
+|---|---|
+| `Space` | hold / run |
+| `[` `]` | back / forward one frame |
+| scrubber | anywhere on its timeline |
+| **Grab frame** | pull that exact frame into the grabber |
+| **Grab all** | the current frame from every instance |
+
+**The grab is the frame you are parked on.** Capturing holds the instance for the
+whole operation — inlining images means awaiting fetches, and a running animation
+would otherwise drift while you waited, handing back a frame the monitor never
+showed. Everything the capture touches is put back afterwards, so the graphic
+carries on exactly as it was.
+
+A template animating from its own `requestAnimationFrame` loop cannot be held by
+any outside transport. Those are detected and labelled **`SCRIPTED`** rather than
+given a scrubber that quietly does nothing.
+
 ## Why an AV person would keep this in a bookmark
 
 - **Chroma key with spill suppression.** Colour-difference keying, so a backdrop with

@@ -231,7 +231,14 @@ async function captureDom(src, settleMs, onNote){
 }
 
 /* ── images, inline SVG and canvases become data URIs the SVG can carry ── */
-async function inlineImages(doc, baseUrl, note){
+/* `undo` makes this reversible. A one-shot capture throws its iframe away and
+   does not care, but a LIVE instance keeps running after the grab — rewriting
+   its image sources and inline background styles permanently would leave the
+   monitor showing something the template never asked for, and would fight any
+   template that animates those properties. Pass an array and every mutation
+   pushes a restore closure onto it. */
+async function inlineImages(doc, baseUrl, note, undo){
+  const keep = (fn) => { if (undo) undo.push(fn); };
   const abs = u => { try { return new URL(u, baseUrl).href; } catch (_) { return null; } };
   const toData = async (u, cap) => {
     if (/^data:/i.test(u)) return u;
@@ -249,11 +256,12 @@ async function inlineImages(doc, baseUrl, note){
     const v = img.getAttribute('src');
     if (!v) continue;
     const d = await toData(v);
+    keep(() => img.setAttribute('src', v));
     if (d) img.setAttribute('src', d);
     else { note('an image could not be read (CORS) and is missing from the frame'); img.removeAttribute('src'); }
   }
   for (const cv of Array.from(doc.querySelectorAll('canvas'))) {
-    try { cv.setAttribute('data-ag-snapshot', cv.toDataURL('image/png')); }
+    try { cv.setAttribute('data-ag-snapshot', cv.toDataURL('image/png')); keep(() => cv.removeAttribute('data-ag-snapshot')); }
     catch (_) { note('a canvas holds cross-origin pixels and could not be captured'); }
   }
   for (const n of Array.from(doc.querySelectorAll('*'))) {
@@ -261,7 +269,7 @@ async function inlineImages(doc, baseUrl, note){
     const m = /url\(\s*["']?([^"')]+)["']?\s*\)/i.exec(bi || '');
     if (!m || /^data:/i.test(m[1])) continue;
     const d = await toData(m[1]);
-    if (d) n.style.backgroundImage = `url("${d}")`;
+    if (d) { const was = n.style.backgroundImage; keep(() => { n.style.backgroundImage = was; }); n.style.backgroundImage = `url("${d}")`; }
     else note('a CSS background image could not be read (CORS) and is missing from the frame');
   }
 }

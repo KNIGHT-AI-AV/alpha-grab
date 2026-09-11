@@ -57,11 +57,14 @@ function boot(){
   if (cv) cv.textContent = `${PROBED} × ${PROBED} px probed · ${CEILING} offered`;
   $('#maxBatch').textContent = AG.MAX_BATCH;
 
+  $('#maxInst').textContent = AG.MAX_INSTANCES;
+
   buildDynamicUI();
   bindControls();
   bindStage();
   bindKeys();
   bindDropAndPaste();
+  bindLive();
   renderRecent();
   renderUserPresets();
   syncControls();
@@ -238,6 +241,7 @@ const gcd = (a, b) => b ? gcd(b, a % b) : (a || 1);
 function syncControls(){
   const o = S.opts;
   segSyncs.forEach(f => f());
+  if ($('#mv')) syncLiveView();
   const v = (id, val) => { const n = $(id); if (n && document.activeElement !== n) n.value = val; };
   v('#tolerance', o.tolerance); v('#softness', o.softness); v('#spill', o.spill);
   v('#lumaLo', o.lumaLo); v('#lumaHi', o.lumaHi);
@@ -324,6 +328,17 @@ async function setSource(src){
   if (S.opts.sizeMode === 'custom' || S.opts.sizeMode === 'native') { S.opts.outW = src.w; S.opts.outH = src.h; }
   $('#empty').style.display = 'none';
   S.fit = true;
+
+  /* An HTML template becomes a running instance the first time it is seen, and
+     every later grab reads that same instance rather than reloading it. A
+     still image has nothing to run, so it never becomes one. */
+  if (src.kind === 'dom' && !src.inst) {
+    try { await addInstance(src); }
+    catch (e) { showError(e); }
+  } else if (src.inst) {
+    LIVE.selected = src.inst.id;
+  }
+
   syncControls();
   await rerun(true);
 }
@@ -826,6 +841,13 @@ function bindKeys(){
     else if (k === 'g') { $('#btnGuides').click(); }
     else if (k === 'k') { togglePick(); }
     else if (k === 'i') { document.body.classList.toggle('no-insp'); layout(); }
+    else if (k === 'l') { MODE = MODE === 'live' ? 'grab' : 'live'; syncControls(); }
+    else if (e.key === ' ' && MODE === 'live') {
+      const i = liveActive(); if (i) { e.preventDefault(); i.playing ? instPause(i) : instPlay(i); syncTransport(); }
+    }
+    else if ((e.key === '[' || e.key === ']') && MODE === 'live') {
+      const i = liveActive(); if (i) { instStep(i, e.key === '[' ? -1 : 1, stepFps()); syncTransport(); }
+    }
     else if (e.key === 'Tab') { e.preventDefault(); document.body.classList.toggle('no-rail'); layout(); }
     else if (k === '0') { S.fit = true; draw(); }
     else if (k === '+' || k === '=') { setZoom(S.zoom * 1.25); }
@@ -845,6 +867,189 @@ function showError(e){
   if (!(e instanceof AGError)) console.error('[AlphaGrab]', e);
 }
 window.addEventListener('error', ev => { if (ev.error) console.error('[AlphaGrab]', ev.error); });
+
+/* ═══════════════════ multiviewer + transport ═══════════════════
+   "Grab" is the processed frame you are about to export. "Live" is every
+   instance running at once. They are two views of the same instances, not two
+   modes with separate state — the selected tile IS the current source, so
+   anything you do in the inspector applies to the graphic you are watching. */
+let MODE = 'grab';
+let mvTimer = null;
+
+function bindLive(){
+  const sm = $('#segMode');
+  sm.append(el('button', { dataset:{ v:'grab' }, textContent:'Grab',
+    title:'The processed frame you are exporting  (L)' }));
+  sm.append(el('button', { dataset:{ v:'live' }, textContent:'Live',
+    title:'Every graphic running at once, switcher-style  (L)' }));
+  segSyncs.push(seg('#segMode', () => MODE, v => { MODE = v; }));
+
+  on($('#tPlay'),    'click', () => { const i = liveActive(); if (!i) return; i.playing ? instPause(i) : instPlay(i); syncTransport(); });
+  on($('#tStepB'),   'click', () => { const i = liveActive(); if (i) { instStep(i, -1, stepFps()); syncTransport(); } });
+  on($('#tStepF'),   'click', () => { const i = liveActive(); if (i) { instStep(i,  1, stepFps()); syncTransport(); } });
+  on($('#tScrub'),   'input', e => { const i = liveActive(); if (!i) return; instPause(i); instSeek(i, +e.target.value); syncTransport(); });
+  on($('#tGrab'),    'click', () => rerun(true));
+  on($('#tGrabAll'), 'click', () => grabAll().catch(showError));
+  on($('#tFps'),     'change', syncTransport);
+
+  /* The scrubber has to follow a running instance, but only while anyone can
+     see it — a timer behind a hidden panel is pure waste on a show laptop. */
+  mvTimer = setInterval(() => { if (MODE === 'live' && !document.hidden) syncTransport(true); }, 120);
+  addEventListener('resize', () => { if (MODE === 'live') LIVE.list.forEach(fitTile); });
+}
+
+const stepFps = () => +($('#tFps') || {}).value || AG.STEP_FPS;
+
+function setMode(v){ MODE = v; syncControls(); }
+
+/* Called from syncControls so the two views never disagree about what is shown. */
+function syncLiveView(){
+  const live = MODE === 'live';
+  /* .off, not [hidden]: the running instances are inside #mv, and an element
+     with no layout box has no computed geometry for the repaint to read. */
+  $('#mv').classList.toggle('off', !live);
+  $('#transport').hidden = !live;
+  $('#mvNone').style.display = LIVE.list.length ? 'none' : '';
+  const empty = $('#empty');
+  if (live) empty.style.display = 'none';
+  else if (!S.source) empty.style.display = '';
+  if (live) { renderMV(); syncTransport(); }
+}
+
+/* ── tiles ───────────────────────────────────────────────────────────── */
+
+/* The iframe keeps its design size and is scaled by transform. Sizing the
+   iframe to the tile instead would reflow the template, so you would be
+   monitoring a layout you are not going to export. */
+function fitTile(inst){
+  if (!inst.frame || !inst.frame.parentElement) return;
+  const view = inst.frame.parentElement;
+  const w = view.clientWidth || 320;
+  const s = w / inst.w;
+  inst.frame.style.transform = `scale(${s})`;
+  view.style.height = Math.round(inst.h * s) + 'px';
+}
+
+function renderMV(){
+  const grid = $('#mvGrid');
+  for (const inst of LIVE.list) {
+    if (inst.tile && inst.tile.isConnected) { paintTileState(inst); continue; }
+
+    const view = el('div', { className:'inst-view' });
+    const badge = el('div', { className:'inst-badge' });
+    view.append(badge);
+    if (inst.frame) view.append(inst.frame);
+
+    const head = el('div', { className:'inst-head' }, [
+      el('span', { className:'inst-name', textContent: inst.name, title: inst.src.url || inst.name }),
+      el('span', { className:'inst-dim',  textContent: `${inst.w}×${inst.h}` }),
+      el('button', { className:'inst-x', textContent:'×', title:'Close this instance', ariaLabel:'Close instance' })
+    ]);
+    const tile = el('div', { className:'inst' }, [head, view]);
+
+    on(head.querySelector('.inst-x'), 'click', e => {
+      e.stopPropagation();
+      tile.remove(); inst.tile = null; disposeInstance(inst); syncControls();
+    });
+    on(view, 'click', () => selectInstance(inst.id));
+
+    inst.tile = tile; inst.badge = badge;
+    grid.append(tile);
+    fitTile(inst);
+    paintTileState(inst);
+  }
+  /* drop tiles whose instance is gone */
+  for (const t of Array.from(grid.children)) if (!LIVE.list.some(i => i.tile === t)) t.remove();
+  $('#mvNone').style.display = LIVE.list.length ? 'none' : '';
+  /* Measure AFTER the grid has laid out. A tile measured in the same frame it
+     was appended reports the width it will have in a one-column grid, so the
+     iframe ends up scaled for a tile that never existed. */
+  requestAnimationFrame(() => LIVE.list.forEach(fitTile));
+}
+
+function paintTileState(inst){
+  if (inst.tile) inst.tile.classList.toggle('sel', inst.id === LIVE.selected);
+  if (!inst.badge) return;
+  const b = inst.badge;
+  b.className = 'inst-badge ' + (inst.scripted ? 'scripted' : inst.playing ? 'live' : 'held');
+  b.textContent = inst.scripted ? 'SCRIPTED' : inst.playing ? 'LIVE' : 'HELD';
+  b.title = inst.scripted
+    ? 'This template animates from script, so the transport cannot hold it. A grab may not be the frame you saw.'
+    : inst.playing ? 'Running' : 'Held on a frame';
+}
+
+/* Selecting a tile makes it the current source, so the inspector, the preview
+   and the export bar all point at the graphic you just clicked. */
+function selectInstance(id){
+  const inst = liveById(id); if (!inst) return;
+  LIVE.selected = id;
+  LIVE.list.forEach(paintTileState);
+  if (S.source !== inst.src) setSource(inst.src).catch(showError);
+  else syncControls();
+}
+
+function syncTransport(quiet){
+  const i = liveActive();
+  const has = !!i;
+  ['#tPlay','#tStepB','#tStepF','#tScrub','#tGrab','#tGrabAll','#tFps'].forEach(s => { const n = $(s); if (n) n.disabled = !has; });
+  $('#tName').textContent = has ? i.name : '—';
+  if (!has) { $('#tTime').textContent = '0.00s'; return; }
+
+  const dur = instDuration(i), t = instTime(i);
+  const scrub = $('#tScrub');
+  scrub.max = Math.max(1, dur);
+  if (document.activeElement !== scrub) scrub.value = Math.min(t, scrub.max);
+  $('#tTime').textContent = (t / 1000).toFixed(2) + 's' + (dur ? ` / ${(dur / 1000).toFixed(2)}s` : '');
+  $('#tPlay').textContent = i.playing ? 'Hold' : 'Run';
+  if (!quiet) LIVE.list.forEach(paintTileState); else paintTileState(i);
+}
+
+/* ── adding + grabbing ───────────────────────────────────────────────── */
+
+/* Every HTML template that loads becomes an instance. That is the whole point:
+   a switcher does not reload a graphic to look at it twice. */
+async function addInstance(src){
+  if (LIVE.list.length >= AG.MAX_INSTANCES) {
+    const oldest = LIVE.list.find(i => i.id !== LIVE.selected) || LIVE.list[0];
+    if (oldest) { if (oldest.tile) oldest.tile.remove(); oldest.tile = null; disposeInstance(oldest); }
+    toast('Instance limit', `Holding ${AG.MAX_INSTANCES} graphics; the oldest was closed.`, 'warn');
+  }
+  const inst = newInstance(src);
+  LIVE.list.push(inst);
+  LIVE.selected = inst.id;
+  src.inst = inst;
+
+  renderMV();                           // tile first, so the iframe mounts visible
+  const view = inst.tile.querySelector('.inst-view');
+  try {
+    await mountInstance(inst, view);
+    fitTile(inst);
+  } catch (e) {
+    inst.error = e; disposeInstance(inst); if (inst.tile) inst.tile.remove();
+    throw e;
+  }
+  paintTileState(inst);
+  syncTransport();
+  return inst;
+}
+
+async function grabAll(){
+  if (!LIVE.list.length) return;
+  const keep = S.source, keepSel = LIVE.selected;
+  const done = busy(`Grabbing ${LIVE.list.length} frames…`);
+  let ok = 0;
+  try {
+    for (const inst of LIVE.list.slice()) {
+      if (!inst.ready) continue;
+      S.source = inst.src;
+      try { await exportFrame(); ok++; } catch (e) { showError(e); }
+    }
+  } finally {
+    S.source = keep; LIVE.selected = keepSel; done();
+    syncControls();
+  }
+  toast('Grabbed', `${ok} of ${LIVE.list.length} instances exported.`, ok ? 'ok' : 'warn');
+}
 
 /* go */
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

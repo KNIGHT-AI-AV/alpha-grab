@@ -362,6 +362,155 @@ await page.waitForTimeout(600);
 is(clicked > 40, `clicked ${clicked} controls`);
 is(errors.length === before, 'not one of them threw', errors.slice(before, before + 3).join(' | '));
 
+/* ══════════════ live instances ══════════════
+   A still of a graphic is not a monitor. These checks prove the template is
+   actually RUNNING, that the transport really holds it, and — the one that
+   matters — that an exported frame is the frame the transport was parked on
+   rather than whatever the animation drifted to while images were fetched. */
+group('an HTML template becomes a running instance');
+
+/* Animates red -> blue over exactly 1s and holds. Any frame can therefore be
+   named by its time, which is what makes the grab checkable. */
+const animTpl = 'data:text/html,' + encodeURIComponent(
+  '<body style="margin:0">' +
+  '<style>@keyframes c{from{background:rgb(255,0,0)}to{background:rgb(0,0,255)}}' +
+  '#b{position:absolute;inset:0;animation:c 1000ms linear forwards}</style>' +
+  '<div id="b"></div></body>');
+
+const inst0 = await page.evaluate(async u => {
+  const src = await loadFromUrl(u);
+  AG.state.opts.settle = 60; AG.state.opts.sizeMode = 'native';
+  AG.state.opts.domW = 200; AG.state.opts.domH = 100;
+  await setSource(src);
+  const i = liveActive();
+  return { n: LIVE.list.length, ready: !!(i && i.ready), attached: !!(i && i.frame && i.frame.contentDocument) };
+}, animTpl);
+is(inst0.n === 1, `the template opened as ${inst0.n} live instance`);
+is(inst0.ready && inst0.attached, 'its iframe is mounted and same-origin readable');
+
+group('the monitor is live, not a still');
+const moving = await page.evaluate(async () => {
+  const i = liveActive();
+  instPlay(i);
+  const read = () => { const d = i.frame.contentDocument; return d.defaultView.getComputedStyle(d.getElementById('b')).backgroundColor; };
+  const a = read();
+  await new Promise(r => setTimeout(r, 220));
+  return { a, b: read() };
+});
+is(moving.a !== moving.b, `the graphic keeps painting on its own: ${moving.a} -> ${moving.b}`);
+
+group('the transport actually holds it');
+const held = await page.evaluate(async () => {
+  const i = liveActive();
+  /* Hold FIRST, then scrub. Seeking a still-running animation lets it drift on
+     between the two calls, and the paint you then read is the frame it drifted
+     to, not the one you asked for. The transport's own handlers pause first for
+     exactly this reason. */
+  instPause(i); instSeek(i, 250);
+  const read = () => { const d = i.frame.contentDocument; return d.defaultView.getComputedStyle(d.getElementById('b')).backgroundColor; };
+  await new Promise(r => requestAnimationFrame(() => r()));   // let the seek reach the computed style
+  const a = read();
+  await new Promise(r => setTimeout(r, 260));
+  return { a, b: read(), playing: i.playing, t: instTime(i) };
+});
+is(held.a === held.b, `held on one frame across 260 ms: ${held.a}`);
+is(!held.playing && Math.abs(held.t - 250) < 40, `and the clock stayed at ${held.t} ms`);
+
+const stepped = await page.evaluate(() => {
+  const i = liveActive();
+  instSeek(i, 500);
+  const before = instTime(i);
+  instStep(i, 1, 25);            // one frame at 25p = 40 ms
+  return { before, after: instTime(i) };
+});
+is(Math.abs((stepped.after - stepped.before) - 40) < 4, `one frame at 25p moved it ${stepped.after - stepped.before} ms`);
+
+group('a grab is the frame the transport is parked on');
+/* The whole point. Park at each end of the animation and export: the pixels
+   that come out must match that moment, not the moment the fetches finished. */
+const parked = await page.evaluate(async () => {
+  const i = liveActive();
+  AG.state.opts.sizeMode = 'native';
+  const at = async ms => {
+    instSeek(i, ms); instPause(i);
+    const d = await fullFrame();
+    const k = ((d.height >> 1) * d.width + (d.width >> 1)) * 4;
+    return [d.data[k], d.data[k + 1], d.data[k + 2], d.data[k + 3]];
+  };
+  return { start: await at(0), end: await at(1000), playing: i.playing };
+});
+is(parked.start[0] > 200 && parked.start[2] < 60, `parked at 0 ms it exports red: rgb(${parked.start.slice(0,3).join(',')})`);
+is(parked.end[2] > 200 && parked.end[0] < 60, `parked at 1000 ms it exports blue: rgb(${parked.end.slice(0,3).join(',')})`);
+is(parked.start[3] === 255 && parked.end[3] === 255, 'both frames came out opaque where the graphic paints');
+
+group('grabbing does not disturb the instance');
+const undisturbed = await page.evaluate(async () => {
+  const i = liveActive();
+  instPlay(i);
+  const doc = i.frame.contentDocument;
+  const before = doc.body.innerHTML.length;
+  await fullFrame();
+  await new Promise(r => setTimeout(r, 60));
+  return { before, after: doc.body.innerHTML.length, playing: i.playing, alive: !!i.frame.contentDocument };
+});
+is(undisturbed.before === undisturbed.after, 'the template DOM is left exactly as it was');
+is(undisturbed.playing && undisturbed.alive, 'and it is still running afterwards');
+
+group('instances are independent');
+const two = await page.evaluate(async u => {
+  const src = await loadFromUrl(u);
+  await setSource(src);
+  const [a, b] = LIVE.list;
+  instPause(a); instSeek(a, 100);
+  instPlay(b);  instSeek(b, 0);
+  const t0 = instTime(b);
+  await new Promise(r => setTimeout(r, 200));
+  return { n: LIVE.list.length, aTime: instTime(a), bMoved: instTime(b) > t0, aPlaying: a.playing, bPlaying: b.playing };
+}, animTpl);
+is(two.n === 2, `a second template opened alongside the first (${two.n} running)`);
+is(Math.abs(two.aTime - 100) < 40 && !two.aPlaying, 'the held one stayed held');
+is(two.bMoved && two.bPlaying, 'while the other kept running');
+
+group('the monitor does not lie about alpha');
+/* An iframe only composites transparently while its color-scheme matches the
+   embedder's; mismatch and Chromium paints an opaque base canvas UNDER html and
+   body, which no background rule can clear. This page is dark, so an instance
+   left at the default `normal` showed WHITE exactly where the export is
+   transparent. Checked on the painted pixel, because computed style says
+   transparent either way. */
+const monitor = await page.evaluate(async () => {
+  MODE = 'live'; syncControls();
+  await new Promise(r => requestAnimationFrame(() => r()));
+  const i = LIVE.list[0], d = i.frame.contentDocument, w = d.defaultView;
+  return {
+    scheme: w.getComputedStyle(d.documentElement).colorScheme,
+    page: getComputedStyle(document.documentElement).colorScheme
+  };
+});
+is(/dark/.test(monitor.scheme), `the instance matches the page's colour scheme: ${monitor.scheme}`);
+
+const tileShot = await (await page.$('.inst-view')).screenshot();
+const tilePx = await page.evaluate(async d => {
+  const img = new Image(); img.src = 'data:image/png;base64,' + d; await img.decode();
+  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+  const x = c.getContext('2d'); x.drawImage(img, 0, 0);
+  return Array.from(x.getImageData(img.width - 6, img.height - 6, 1, 1).data).slice(0, 3);
+}, tileShot.toString('base64'));
+is(!(tilePx[0] > 240 && tilePx[1] > 240 && tilePx[2] > 240),
+   `empty areas of the tile show the checkerboard, not an opaque base: rgb(${tilePx.join(',')})`);
+
+group('the multiviewer keeps its layout when it is not the visible view');
+/* [hidden]/display:none would strip every layout box from the instances, and
+   the repaint would then export an empty frame. Measured: it did. */
+const laidOut = await page.evaluate(() => {
+  MODE = 'grab'; syncControls();
+  const mv = document.getElementById('mv');
+  const tile = LIVE.list[0].frame.getBoundingClientRect();
+  return { off: mv.classList.contains('off'), hidden: mv.hidden, w: Math.round(tile.width), h: Math.round(tile.height) };
+});
+is(laidOut.off && !laidOut.hidden, 'it is hidden with visibility, not [hidden]');
+is(laidOut.w > 0 && laidOut.h > 0, `so the instances still have a layout box: ${laidOut.w} x ${laidOut.h}`);
+
 group('no errors accumulated across the whole run');
 is(errors.length === 0, 'still no console or page errors', errors.slice(0, 3).join(' | '));
 

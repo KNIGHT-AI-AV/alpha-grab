@@ -98,6 +98,20 @@ is(/id="maxBatch"/.test(tpl) && /\$\('#maxBatch'\)\.textContent = AG\.MAX_BATCH/
 is(/\$\('#resHint'\)\.innerHTML[\s\S]{0,220}\$\{CEILING\}/.test(uiSrc),
    'the size cap shown in the UI is the probed ceiling, not a hardcoded number');
 
+const live = read('src/js/25-live.js');
+is(/id="maxInst"/.test(tpl) && /\$\('#maxInst'\)\.textContent = AG\.MAX_INSTANCES/.test(uiSrc),
+   'the instance cap shown in the UI is printed from AG.MAX_INSTANCES, not typed into the HTML');
+is(/LIVE\.list\.length >= AG\.MAX_INSTANCES/.test(uiSrc),
+   'and that same constant is what actually enforces the cap');
+is(/clamp\(fps \|\| AG\.STEP_FPS/.test(live),
+   'the transport steps by AG.STEP_FPS unless the UI names a rate');
+is(!/sandbox/.test(live) || /NOT sandboxed/.test(live),
+   'the live iframe is not sandboxed — the repaint needs same-origin access to it');
+is(/instPause\(inst\);[\s\S]{0,400}domToSvg/.test(live) && /if \(wasPlaying\) instPlay/.test(live),
+   'a grab holds the instance for the whole capture, so the frame is one instant and not a smear');
+is(/undo/.test(read('src/js/20-source.js')) && /while \(undo\.length\)/.test(live),
+   'every DOM mutation a grab makes is undone, so a live instance is left as it was');
+
 /* ── honesty rules that matter more than features ─────────────────────── */
 group('honest-failure rules');
 is(/probeCanvasCeiling/.test(read('src/js/10-core.js')) && /getImageData/.test(read('src/js/10-core.js')),
