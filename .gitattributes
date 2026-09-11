@@ -1,0 +1,5 @@
+# The build id is a content hash of src/. CRLF on a Windows checkout changes
+# that hash for byte-identical code, so the id would say "changed" when nothing
+# did. Normalise every text file to LF in the repo and in the working tree.
+* text=auto eol=lf
+*.png binary

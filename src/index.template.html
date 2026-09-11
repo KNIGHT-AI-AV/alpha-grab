@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>AlphaGrab — transparent frame grabber for AV | Knight AI+AV</title>
+<meta name="description" content="Paste a URL, pull a high-resolution frame with a real alpha channel. Chroma key, matte tools, fill and key export, PNG/WebP/TGA. Runs entirely in your browser — nothing is uploaded. Built for broadcast and AV.">
+<meta name="theme-color" content="#0a0c0f">
+<meta name="color-scheme" content="dark">
+<meta name="author" content="Knight AI+AV">
+<meta property="og:type" content="website">
+<meta property="og:title" content="AlphaGrab — transparent frame grabber for AV">
+<meta property="og:description" content="Any URL in. A high-resolution frame with a real alpha channel out. Chroma key, matte tools, fill + key, PNG/WebP/TGA — all in the browser.">
+<meta property="og:image" content="screenshot.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="screenshot.png">
+<link rel="icon" href="__FAVICON__">
+<style>__CSS__</style>
+</head>
+<body>
+<div id="app">
+
+<!-- ══════════════════════════ top bar ══════════════════════════ -->
+<header class="bar">
+  <div class="brand" title="AlphaGrab v__VERSION__">
+    <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+      <defs><clipPath id="lm"><rect x="2" y="2" width="28" height="28" rx="7"/></clipPath></defs>
+      <g clip-path="url(#lm)">
+        <rect x="2" y="2" width="28" height="28" fill="#161c24"/>
+        <g fill="#232b36"><rect x="2" y="2" width="7" height="7"/><rect x="16" y="2" width="7" height="7"/><rect x="9" y="9" width="7" height="7"/><rect x="23" y="9" width="7" height="7"/><rect x="2" y="16" width="7" height="7"/><rect x="16" y="16" width="7" height="7"/><rect x="9" y="23" width="7" height="7"/><rect x="23" y="23" width="7" height="7"/></g>
+        <path d="M16 6.4 L24.6 25.6 H20.2 L18.6 21.6 H13.4 L11.8 25.6 H7.4 Z M16 12.9 L14.6 17.9 H17.4 Z" fill="#ffb020"/>
+      </g>
+      <rect x="2.6" y="2.6" width="26.8" height="26.8" rx="6.6" fill="none" stroke="#ffb02066"/>
+    </svg>
+    <span class="brand-txt"><b>Alpha<i>Grab</i></b><span class="by">Knight AI+AV</span></span>
+  </div>
+
+  <div class="urlwrap">
+    <span class="pre" aria-hidden="true">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>
+    </span>
+    <input id="url" type="text" spellcheck="false" autocomplete="off" autocapitalize="off"
+           placeholder="https://…  image, SVG or HTML graphics template" aria-label="Source URL">
+    <button id="grab" title="Grab the frame  (Enter)">Grab</button>
+  </div>
+
+  <div class="bar-actions">
+    <button class="btn" id="btnFile" title="Open a local file  (O)">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.5L10 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/></svg>
+      <span class="lbl-hide">File</span>
+    </button>
+    <input type="file" id="fileInput" class="sr" accept="image/*,.svg,.html,.htm" multiple>
+    <button class="btn" id="btnHelp" title="Help &amp; shortcuts  (?)">?</button>
+    <button class="btn" id="btnRail" title="Toggle controls  (Tab)" aria-label="Toggle controls panel">◧</button>
+    <button class="btn" id="btnInsp" title="Toggle inspector  (I)" aria-label="Toggle inspector panel">◨</button>
+  </div>
+</header>
+
+<main>
+<!-- ══════════════════════════ left rail ══════════════════════════ -->
+<aside class="rail" id="rail">
+
+  <details class="panel" id="pSource" open>
+    <summary><span class="dot"></span>Source<span class="chev">▶</span></summary>
+    <div class="pbody">
+      <div class="row">
+        <button class="btn grow" id="btnFile2">Open file…</button>
+        <button class="btn grow" id="btnPaste" title="Paste an image or a URL from the clipboard">Paste</button>
+      </div>
+      <p class="hint">Drop a file anywhere, paste with <kbd>Ctrl</kbd>+<kbd>V</kbd>, or grab a URL above. Local files skip every network restriction — use them when a server will not share its pixels.</p>
+
+      <div id="domOnly" hidden>
+        <div class="field">
+          <label class="lbl" for="settle">Template settle <span class="v" id="vSettle">900 ms</span></label>
+          <input type="range" id="settle" min="0" max="10000" step="100">
+          <p class="hint">How long an HTML template is allowed to run before the frame is taken — long enough for an animated lower third to reach its hold.</p>
+        </div>
+        <div class="field">
+          <span class="lbl">Template canvas <span class="v" id="vDom"></span></span>
+          <div class="row">
+            <input type="number" id="domW" min="16" step="1" class="grow" aria-label="Template layout width">
+            <input type="number" id="domH" min="16" step="1" class="grow" aria-label="Template layout height">
+          </div>
+          <p class="hint">The size the template lays out at. It is repainted as vector, so the output resolution is free — a 1920×1080 template exports at 8K without a single enlarged pixel.</p>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="check"><input type="checkbox" id="useProxy"> Fetch through a CORS proxy</label>
+        <input type="text" id="proxy" spellcheck="false" placeholder="https://my-proxy.example/{url}">
+        <p class="hint">Only needed when a server refuses to share its pixels with a browser. <code>{url}</code> is replaced with the encoded address. Run your own — anything you route through a proxy is visible to whoever runs it.</p>
+      </div>
+
+      <div class="field" id="recentWrap" hidden>
+        <span class="lbl">Recent</span>
+        <div class="chips" id="recent"></div>
+      </div>
+    </div>
+  </details>
+
+  <details class="panel" id="pRes" open>
+    <summary><span class="dot"></span>Resolution<span class="chev">▶</span></summary>
+    <div class="pbody">
+      <div class="seg" id="segSize" role="tablist">
+        <button data-v="native">Native</button><button data-v="preset">Preset</button>
+        <button data-v="custom">Custom</button><button data-v="scale">Scale</button>
+      </div>
+
+      <div class="field" data-when="preset">
+        <label class="lbl" for="preset">Broadcast preset</label>
+        <select id="preset"></select>
+      </div>
+
+      <div class="field" data-when="custom">
+        <span class="lbl">Width × Height <span class="v" id="vAspect"></span></span>
+        <div class="row">
+          <input type="number" id="outW" min="16" step="1" class="grow" aria-label="Output width">
+          <button class="btn" id="lockAspect" title="Lock aspect ratio">🔗</button>
+          <input type="number" id="outH" min="16" step="1" class="grow" aria-label="Output height">
+          <button class="btn" id="swapWH" title="Swap width and height">⇄</button>
+        </div>
+      </div>
+
+      <div class="field" data-when="scale">
+        <label class="lbl" for="scale">Scale <span class="v" id="vScale">2×</span></label>
+        <input type="range" id="scale" min="0.1" max="8" step="0.1">
+      </div>
+
+      <div class="field">
+        <span class="lbl">Fit</span>
+        <div class="seg" id="segFit">
+          <button data-v="contain">Contain</button><button data-v="cover">Cover</button><button data-v="stretch">Stretch</button>
+        </div>
+      </div>
+      <div class="field">
+        <span class="lbl">Resample</span>
+        <div class="seg" id="segResample">
+          <button data-v="smooth">Smooth</button><button data-v="pixel">Pixel / nearest</button>
+        </div>
+      </div>
+      <p class="hint" id="resHint"></p>
+    </div>
+  </details>
+
+  <details class="panel" id="pKey">
+    <summary><span class="dot"></span>Key<span class="chev">▶</span></summary>
+    <div class="pbody">
+      <div class="seg" id="segKey">
+        <button data-v="none">Off</button><button data-v="chroma">Chroma</button>
+        <button data-v="luma">Luma</button><button data-v="colorAlpha">Colour→α</button>
+      </div>
+
+      <div class="field" data-key="chroma colorAlpha">
+        <span class="lbl">Key colour</span>
+        <div class="row">
+          <input type="color" id="keyColor" aria-label="Key colour">
+          <button class="btn" id="pickColor" title="Pick the colour off the frame">Eyedropper</button>
+        </div>
+        <div class="chips" id="keyPresets"></div>
+      </div>
+
+      <div class="field" data-key="chroma colorAlpha">
+        <label class="lbl" for="tolerance">Tolerance <span class="v" id="vTol"></span></label>
+        <input type="range" id="tolerance" min="0" max="100" step="1">
+      </div>
+      <div class="field" data-key="chroma">
+        <label class="lbl" for="softness">Edge softness <span class="v" id="vSoft"></span></label>
+        <input type="range" id="softness" min="0" max="100" step="1">
+      </div>
+      <div class="field" data-key="chroma">
+        <label class="lbl" for="spill">Spill suppression <span class="v" id="vSpill"></span></label>
+        <input type="range" id="spill" min="0" max="100" step="1">
+      </div>
+
+      <div class="field" data-key="luma">
+        <label class="lbl" for="lumaLo">Black point <span class="v" id="vLumaLo"></span></label>
+        <input type="range" id="lumaLo" min="0" max="100" step="1">
+        <label class="lbl" for="lumaHi">White point <span class="v" id="vLumaHi"></span></label>
+        <input type="range" id="lumaHi" min="0" max="100" step="1">
+        <label class="check"><input type="checkbox" id="lumaInvert"> Invert (keep the dark side)</label>
+      </div>
+      <p class="hint" id="keyHint"></p>
+    </div>
+  </details>
+
+  <details class="panel" id="pMatte">
+    <summary><span class="dot"></span>Matte<span class="chev">▶</span></summary>
+    <div class="pbody">
+      <div class="field">
+        <label class="lbl" for="choke">Choke / grow <span class="v" id="vChoke"></span></label>
+        <input type="range" id="choke" min="-12" max="12" step="1">
+      </div>
+      <div class="field">
+        <label class="lbl" for="feather">Feather <span class="v" id="vFeather"></span></label>
+        <input type="range" id="feather" min="0" max="24" step="0.5">
+      </div>
+      <div class="field">
+        <label class="lbl" for="alphaGamma">Matte gamma <span class="v" id="vGamma"></span></label>
+        <input type="range" id="alphaGamma" min="0.2" max="4" step="0.05">
+      </div>
+      <div class="field">
+        <label class="lbl" for="alphaGain">Matte gain <span class="v" id="vGain"></span></label>
+        <input type="range" id="alphaGain" min="0.2" max="3" step="0.05">
+      </div>
+      <hr style="border:0;border-top:1px solid var(--line);margin:2px 0">
+      <label class="check"><input type="checkbox" id="trim"> Trim to content</label>
+      <div class="row" data-when-trim>
+        <div class="field grow"><label class="lbl" for="trimPad">Padding <span class="v" id="vPad"></span></label><input type="range" id="trimPad" min="0" max="200" step="1"></div>
+      </div>
+      <label class="check"><input type="checkbox" id="unpremul" title="Divide colour back out of alpha before keying"> Un-premultiply input</label>
+      <label class="check"><input type="checkbox" id="premul" title="Multiply colour into alpha on the way out"> Premultiply output</label>
+      <p class="hint">Straight alpha is what PNG, After Effects and most switchers expect. Premultiplied output suits engines that composite over black — Notch, some Unreal and Resolume paths.</p>
+      <button class="btn wide" id="resetKey">Reset key &amp; matte</button>
+    </div>
+  </details>
+</aside>
+
+<!-- ══════════════════════════ stage ══════════════════════════ -->
+<section class="stage">
+  <div class="stage-top">
+    <div class="seg" id="segView" style="min-width:290px"></div>
+    <div class="vsep"></div>
+    <span class="lbl" style="letter-spacing:.4px">BG</span>
+    <div class="chips" id="backdrops"></div>
+    <div class="vsep"></div>
+    <button class="btn" id="btnGuides" title="Title &amp; action safe, centre, thirds  (G)">Guides</button>
+    <div class="vsep"></div>
+    <button class="btn sm" id="zoomOut" aria-label="Zoom out">−</button>
+    <span class="zoomlbl" id="zoomLbl">Fit</span>
+    <button class="btn sm" id="zoomIn" aria-label="Zoom in">+</button>
+    <button class="btn sm" id="zoomFit" title="Fit  (0)">Fit</button>
+    <button class="btn sm" id="zoom100" title="100%  (1:1)">1:1</button>
+  </div>
+
+  <div class="viewport" id="viewport">
+    <div id="pan">
+      <div class="canvas-stack" id="stack">
+        <canvas id="cvBg" class="checker"></canvas>
+        <canvas id="cvOut"></canvas>
+        <canvas id="cvGuide"></canvas>
+      </div>
+    </div>
+
+    <div class="empty" id="empty">
+      <svg width="54" height="54" viewBox="0 0 32 32" aria-hidden="true" style="opacity:.9">
+        <g fill="#232b36"><rect x="0" y="0" width="8" height="8"/><rect x="16" y="0" width="8" height="8"/><rect x="8" y="8" width="8" height="8"/><rect x="24" y="8" width="8" height="8"/><rect x="0" y="16" width="8" height="8"/><rect x="16" y="16" width="8" height="8"/><rect x="8" y="24" width="8" height="8"/><rect x="24" y="24" width="8" height="8"/></g>
+        <path d="M16 5 L25.5 26 H20.8 L19 21.6 H13 L11.2 26 H6.5 Z M16 12.2 L14.4 17.8 H17.6 Z" fill="#ffb020"/>
+      </svg>
+      <div class="big">Any URL in. A transparent frame out.</div>
+      <p>Paste a link to an image, an SVG, or a live HTML graphics template. AlphaGrab renders it at broadcast resolution, keeps the alpha channel honest, and hands you a frame you can drop straight onto a timeline or a switcher.</p>
+      <div class="kbd-row"><kbd>Ctrl</kbd>+<kbd>V</kbd> paste · <kbd>O</kbd> open file · drag a file anywhere · <kbd>?</kbd> help</div>
+      <div class="samples">
+        <button class="btn" data-demo="lower3">Try: lower third (SVG)</button>
+        <button class="btn" data-demo="green">Try: green screen frame</button>
+      </div>
+    </div>
+
+    <div class="dropzone">Drop an image, SVG or HTML file</div>
+    <div id="busy"><div class="spinner"></div><div id="busyMsg">Working…</div></div>
+  </div>
+
+  <div class="stage-bottom">
+    <div class="seg" id="segFormat" style="min-width:230px"></div>
+    <div class="row" id="qualityWrap" style="min-width:150px">
+      <span class="lbl" style="white-space:nowrap">Q <span class="v" id="vQuality"></span></span>
+      <input type="range" id="quality" min="5" max="100" step="1" style="width:80px">
+    </div>
+    <input type="text" id="filename" class="grow" spellcheck="false" style="min-width:170px;max-width:280px" aria-label="Filename template" placeholder="{name}_{w}x{h}">
+    <div class="vsep"></div>
+    <span class="outsize" id="outsize">—</span>
+    <div class="vsep"></div>
+    <button class="btn" id="btnCopy" title="Copy the frame as a PNG  (Ctrl+C)">Copy</button>
+    <button class="btn" id="btnFillKey" title="Download the fill and the key as two files">Fill + Key</button>
+    <button class="btn primary" id="btnSave" title="Download  (Ctrl+S)">Download</button>
+  </div>
+</section>
+
+<!-- ══════════════════════════ inspector ══════════════════════════ -->
+<aside class="insp" id="insp">
+  <details class="panel" open>
+    <summary><span class="dot"></span>Frame<span class="chev">▶</span></summary>
+    <div class="pbody"><dl class="kv" id="kvFrame"><dt>Source</dt><dd>—</dd></dl></div>
+  </details>
+
+  <details class="panel" open>
+    <summary><span class="dot"></span>Alpha QC<span class="chev">▶</span></summary>
+    <div class="pbody">
+      <div class="qc" id="qc"><p class="hint">Grab a frame and every number here is counted off the pixels you are about to export.</p></div>
+      <div class="field" id="covWrap" hidden>
+        <span class="lbl">Opaque coverage <span class="v" id="vCov"></span></span>
+        <div class="meter"><i id="covBar" style="width:0"></i></div>
+      </div>
+      <canvas class="histo" id="histo" width="260" height="56" hidden></canvas>
+    </div>
+  </details>
+
+  <details class="panel">
+    <summary><span class="dot"></span>Batch<span class="chev">▶</span></summary>
+    <div class="pbody">
+      <p class="hint">One URL per line, up to <b id="maxBatch"></b>. Every line is processed with the settings you have set now, then downloaded as a ZIP.</p>
+      <textarea id="batchUrls" rows="4" spellcheck="false" placeholder="https://…/bug.png&#10;https://…/lower-third.svg"></textarea>
+      <div class="row">
+        <button class="btn grow" id="btnBatch">Run batch</button>
+        <button class="btn" id="btnBatchClear" title="Clear the queue">Clear</button>
+      </div>
+      <div class="queue" id="queue"></div>
+    </div>
+  </details>
+
+  <details class="panel">
+    <summary><span class="dot"></span>Presets &amp; sharing<span class="chev">▶</span></summary>
+    <div class="pbody">
+      <div class="row">
+        <input type="text" id="presetName" placeholder="Name this look" spellcheck="false" class="grow">
+        <button class="btn" id="btnSavePreset">Save</button>
+      </div>
+      <div class="chips" id="userPresets"></div>
+      <button class="btn wide" id="btnPermalink">Copy a link with these settings</button>
+      <p class="hint">The link carries the source URL and every slider — hand it to an operator and they open the same setup. Presets are stored in this browser only.</p>
+    </div>
+  </details>
+
+  <details class="panel">
+    <summary><span class="dot"></span>About<span class="chev">▶</span></summary>
+    <div class="pbody">
+      <dl class="kv">
+        <dt>Version</dt><dd>__VERSION__</dd>
+        <dt>Build</dt><dd>__BUILD__</dd>
+        <dt>Canvas limit</dt><dd id="ceilVal">—</dd>
+        <dt>Network</dt><dd>fetch only</dd>
+      </dl>
+      <p class="hint">No account, no upload, no server. Frames are decoded, keyed and encoded on this machine — the only network traffic is fetching the URL you type. Save the page and it works offline.</p>
+      <p class="hint">© Knight AI+AV</p>
+    </div>
+  </details>
+</aside>
+</main>
+</div>
+
+<!-- ══════════════════════════ help ══════════════════════════ -->
+<dialog id="help">
+  <div class="dh">
+    <h2>AlphaGrab — what it does and where it stops</h2>
+    <button class="btn" id="helpClose">Close</button>
+  </div>
+  <div class="db">
+    <section>
+      <h3>The idea</h3>
+      <p>Point it at a URL. It fetches the bytes, renders them at the resolution you choose, keeps or creates a real alpha channel, and hands you a frame. Images, SVGs and HTML graphics templates all go in the same box.</p>
+    </section>
+    <section>
+      <h3>Honest limits — read this once</h3>
+      <ul>
+        <li><b>CORS.</b> A browser may only read pixels a server agrees to share. If a host does not send <code>Access-Control-Allow-Origin</code>, AlphaGrab says so plainly instead of exporting an empty frame. Drop the file in, or route it through a proxy you run.</li>
+        <li><b>HTML templates.</b> The page really runs — its scripts execute in a same-origin frame — and the settled DOM is then repainted as native SVG, so the frame is <i>vector</i> and scales to 8K without a single enlarged pixel. Boxes, gradients, borders, radii, opacity, images, inline SVG and text all survive with their layout intact. Box shadows, CSS filters, blend modes, clipping and rotate/scale transforms do not, and every one that is actually present is named in a warning rather than quietly dropped. Assets from servers without CORS cannot be embedded and are reported as missing. Anything painted after the settle delay is not in the frame.</li>
+        <li><b>Upscaling.</b> Vectors and HTML are rendered natively at the size you ask for, so 8K is genuinely 8K. A bitmap enlarged past its own resolution is interpolation — AlphaGrab labels it rather than calling it detail.</li>
+        <li><b>Canvas ceiling.</b> Browsers differ, and an over-sized canvas fails <i>silently</i> — it reads back empty. AlphaGrab writes and reads a probe pixel at start-up and shows the real ceiling in <b>About</b>.</li>
+      </ul>
+    </section>
+    <section>
+      <h3>Which key</h3>
+      <table>
+        <tr><th>Use</th><th>When</th></tr>
+        <tr><td>Chroma</td><td>Green or blue screen. Keys on hue, so a lit backdrop with a brightness falloff still keys clean. Spill suppression pulls the backdrop out of the edges.</td></tr>
+        <tr><td>Luma</td><td>Graphics delivered on flat black or flat white with nothing to key on but brightness.</td></tr>
+        <tr><td>Colour→α</td><td>A logo or title on a flat colour. It removes the colour <i>and</i> unmixes it out of anti-aliased edges, so type keeps its softness instead of a halo.</td></tr>
+      </table>
+    </section>
+    <section>
+      <h3>Why the HTML frame is vector</h3>
+      <p>The obvious way to snapshot a live DOM is to wrap it in an SVG <code>&lt;foreignObject&gt;</code>. It is one line, and it is a dead end: Chromium marks any canvas that touches such an image as tainted, so the frame renders on screen and then cannot be read back or exported — silently, with no error of its own. AlphaGrab repaints the DOM into real SVG shapes and text instead. It is more work and it buys two things: the frame can actually be exported, and an HTML lower third re-renders at any resolution instead of being enlarged.</p>
+    </section>
+    <section>
+      <h3>Fill and key</h3>
+      <p><b>Fill + Key</b> writes two files: an opaque RGB fill and a greyscale key. That is what a switcher or a playout server wants over two paths. <b>Premultiply output</b> is for engines that composite over black — leave it off for PNG, After Effects and most switchers.</p>
+    </section>
+    <section>
+      <h3>Filename tokens</h3>
+      <p><code>{name}</code> <code>{w}</code> <code>{h}</code> <code>{ext}</code> <code>{date}</code> <code>{time}</code> <code>{host}</code> <code>{n}</code> <code>{key}</code></p>
+    </section>
+    <section>
+      <h3>Shortcuts</h3>
+      <table>
+        <tr><td>Enter</td><td>Grab the URL in the bar</td></tr>
+        <tr><td>1 – 5</td><td>Result · Fill · Key · Fill|Key · Source</td></tr>
+        <tr><td>Ctrl/⌘ + S</td><td>Download the frame</td></tr>
+        <tr><td>Ctrl/⌘ + C</td><td>Copy the frame as a PNG</td></tr>
+        <tr><td>Ctrl/⌘ + V</td><td>Paste an image or a URL</td></tr>
+        <tr><td>O</td><td>Open a local file</td></tr>
+        <tr><td>G</td><td>Safe-area guides</td></tr>
+        <tr><td>K</td><td>Eyedropper — pick the key colour off the frame</td></tr>
+        <tr><td>0 · +/−</td><td>Fit · zoom</td></tr>
+        <tr><td>Tab · I</td><td>Hide the controls · hide the inspector</td></tr>
+      </table>
+    </section>
+    <section>
+      <h3>Running your own proxy</h3>
+      <p>Anything routed through someone else's proxy is visible to whoever runs it. One file, no dependencies, on the machine you already trust:</p>
+      <pre><code>// cors-proxy.mjs — node cors-proxy.mjs   (then use http://localhost:8787/{url})
+import http from 'node:http';
+http.createServer(async (req, res) => {
+  const target = decodeURIComponent(req.url.slice(1));
+  res.setHeader('access-control-allow-origin', '*');
+  if (!/^https?:\/\//.test(target)) return res.end();
+  const up = await fetch(target);
+  res.setHeader('content-type', up.headers.get('content-type') || 'application/octet-stream');
+  res.end(Buffer.from(await up.arrayBuffer()));
+}).listen(8787);</code></pre>
+    </section>
+    <section>
+      <h3>Privacy</h3>
+      <p>There is no account and no server. Files never leave the machine — decoding, keying and encoding all happen in this tab. The only request AlphaGrab makes is for the URL you type. Save this page to disk and it keeps working with no network at all.</p>
+    </section>
+  </div>
+</dialog>
+
+<div id="toasts" aria-live="polite"></div>
+<script>__JS__</script>
+</body>
+</html>

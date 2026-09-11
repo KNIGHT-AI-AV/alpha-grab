@@ -1,0 +1,14 @@
+{
+  "name": "alphagrab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AlphaGrab — pull a high-resolution frame with a real alpha channel out of any URL. Browser-only, for broadcast and AV.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node tests/guard.mjs",
+    "check": "node build.mjs && node tests/guard.mjs"
+  },
+  "author": "Knight AI+AV",
+  "license": "UNLICENSED"
+}
