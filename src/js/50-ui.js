@@ -1099,6 +1099,9 @@ function bindSimple(){
 function setUiMode(mode){
   S.opts.ui = mode === 'full' ? 'full' : 'simple';
   document.body.classList.toggle('simple', S.opts.ui === 'simple');
+  /* The panel toggles mean nothing in simple mode and their classes carry
+     enough specificity to fight its layout; drop them on the way in. */
+  if (S.opts.ui === 'simple') document.body.classList.remove('no-rail', 'no-insp');
   $('#btnSimple').textContent = S.opts.ui === 'simple' ? 'Full controls' : 'Simple';
   /* Simple mode is a broadcast frame, not "whatever the source happened to be":
      1920x1080, contained, transparent where the graphic does not paint. A

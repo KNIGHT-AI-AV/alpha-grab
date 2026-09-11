@@ -1,5 +1,28 @@
 # AlphaGrab changelog
 
+## 0.3.1 - 2026-09-11
+
+Phones and narrow windows. Reported from one: "what is this random texture up
+here" - the checkerboard preview, shrunk to a corner.
+
+- **Simple mode at <= 980px:** its three-column rule overrode the stacked
+  single-column layout, so the stage auto-placed into a 0-wide column and the
+  canvas fell to 19x11 in the corner. Simple mode is one column at every width.
+- **Simple mode after Tab or I:** `body.no-rail.no-insp` carries two classes and
+  out-ranked simple mode's layout, putting the stage back in a 0-wide column at
+  desktop width - only after someone had toggled a panel in full mode. Those
+  classes are dropped on the way into simple mode, and the selectors now match
+  at every combination.
+- **Full mode at <= 980px (pre-existing, since 0.2.0):** the stage row had a
+  200px floor and the viewer's own top and bottom bars are ~120px of chrome, so
+  the viewport was 0px tall and no phone ever showed a picture in full mode.
+  The stage row now keeps its auto minimum, the panels cap at 30vh, the viewport
+  has a 240px floor, and main scrolls vertically instead of clipping.
+
+Verification: 46 guard and 98 Chromium checks (eight new: stage width, viewport
+height, canvas centring and zero horizontal scroll at 375, 767, 980 and 1600
+px, in both modes), run twice. No check had ever resized the window before.
+
 ## 0.3.0 - 2026-09-11
 
 Simple mode, and the repeat loop it exists for: look at the graphic, download

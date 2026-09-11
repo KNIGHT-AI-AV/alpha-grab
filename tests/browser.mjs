@@ -554,10 +554,43 @@ const widths = await page.evaluate(() => {
 is(Object.values(widths).every(v => v > 300),
    `the stage stays visible with any panel hidden: ${Object.entries(widths).map(([k, v]) => k + '=' + v).join(' ')}`);
 
+group('the viewer is usable at phone, tablet and desktop widths, in both modes');
+/* Found on a phone: a stray checkerboard rectangle in the corner. Simple mode's
+   three-column rule overrode the narrow single-column layout, and the stage
+   auto-placed into a 0-wide column. No check had ever resized the window. */
+const sizes = [[375, 812], [767, 616], [980, 800], [1600, 1000]];
+const original = page.viewportSize();
+const originalBody = await page.evaluate(() => document.body.className);
+const responsive = [];
+for (const mode of ['simple', 'full']) {
+  for (const [w, h] of sizes) {
+    await page.setViewportSize({ width: w, height: h });
+    await page.evaluate(m => { setUiMode(m); AG.state.fit = true; layout(); draw(); }, mode);
+    await page.waitForTimeout(250);
+    const r = await page.evaluate(() => {
+      const g = n => { const e = document.querySelector(n); const b = e.getBoundingClientRect(); return { w: Math.round(b.width), h: Math.round(b.height), x: b.x, y: b.y }; };
+      const s = g('.stage'), v = g('#viewport'), c = g('#cvOut');
+      return { stage: s.w, vpH: v.h, canvas: c.w, off: Math.round(Math.abs((c.x + c.w / 2) - (v.x + v.w / 2))),
+               overflow: document.documentElement.scrollWidth - window.innerWidth };
+    });
+    responsive.push({ mode, w, ...r });
+  }
+}
+await page.setViewportSize(original);
+await page.evaluate(c => { document.body.className = c; setUiMode('full'); AG.state.fit = true; layout(); draw(); }, originalBody);
+for (const r of responsive) {
+  const ok = r.stage >= r.w * 0.95 || (r.mode === 'full' && r.w >= 981 && r.stage > 300);
+  is(ok && r.canvas > 100 && r.off <= 2 && r.overflow <= 0,
+     `${r.mode.padEnd(6)} ${String(r.w).padStart(4)}px: stage ${r.stage}, canvas ${r.canvas}px wide, centred, no horizontal scroll`,
+     `stage=${r.stage} vpH=${r.vpH} canvas=${r.canvas} off=${r.off} overflow=${r.overflow}`);
+}
+
 group('simple mode always exports a full 1080 broadcast frame');
 const pinned = await page.evaluate(async () => {
   /* a 300x150 source must still come out 1920x1080, letterboxed in transparency
-     — a switcher cannot use a frame whose size follows whatever was loaded */
+     — a switcher cannot use a frame whose size follows whatever was loaded.
+     Say which mode is under test; the previous section left the page in full. */
+  setUiMode('simple');
   const src = await loadFromUrl('data:text/html,' + encodeURIComponent(
     '<body style="margin:0"><div style="position:absolute;left:20px;top:20px;width:120px;height:40px;background:#ffb020"></div></body>'));
   AG.state.opts.settle = 60; AG.state.opts.domW = 300; AG.state.opts.domH = 150;
