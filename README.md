@@ -27,6 +27,47 @@ you ask for, and hands you a frame whose transparency is real and measured.
 | **HTML graphics template** | Run for real so its scripts execute, given time to settle on its hold frame, then **repainted as native SVG** — so the export is vector and scales to 8K without enlargement |
 | **Local file** | Dropped, pasted or opened — skips every network restriction |
 
+## The repeat loop (simple mode, the default)
+
+Look at the graphic, download it, push the next one to the same URL, download
+again. That is the whole job, so it is the whole interface: the graphic fills the
+screen at 16:9 on a checkerboard, and one row underneath carries everything else.
+
+| | |
+|---|---|
+| **Download** / `Enter` | re-fetch the URL, render 1920x1080, save the next clip |
+| **next `clip_001.png`** | the name *before* you press it; the counter survives a reload |
+| **Refresh** / `R` | re-fetch without downloading |
+| **Re-fetch each time** | on by default — see below |
+| `S` | full controls, and back |
+
+**Download re-fetches first, and that is the point.** Without it the button would
+re-encode the frame already in memory and hand back an older graphic under a new
+number — which looks exactly like working.
+
+Output is always a full **1920x1080** frame, whatever size the source lays out
+at, contained and transparent where nothing paints. A frame whose size follows
+the source is no use to a switcher.
+
+### When the host refuses to share it
+
+Broadcast graphics platforms serve their viz pages without
+`Access-Control-Allow-Origin`, and they are third parties — nobody using this
+tool can add the header. A CORS refusal carries a one-click **Use the relay**
+button, which fetches through a small server we run. It is **off until you press
+it**: a relay sees every URL routed through it. Rendering, keying and encoding
+still happen in your browser either way.
+
+### It tells you when a clip is worthless
+
+All three of these produce a valid file of the right size and format:
+
+- the URL **has not changed** — two clips from byte-identical content
+- the frame is **empty** — a live viz with nothing on air
+- the format **cannot carry alpha** — JPEG flattens onto the matte
+
+Each is said out loud at the moment it happens, rather than found later.
+
 ## Live instances
 
 A production switcher does not show you a still of a graphic — it shows you the

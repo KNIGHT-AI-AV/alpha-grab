@@ -50,6 +50,7 @@
       <span class="lbl-hide">File</span>
     </button>
     <input type="file" id="fileInput" class="sr" accept="image/*,.svg,.html,.htm" multiple>
+    <button class="btn" id="btnSimple" title="Switch between the simple grab loop and the full controls  (S)">Full&nbsp;controls</button>
     <button class="btn" id="btnHelp" title="Help &amp; shortcuts  (?)">?</button>
     <button class="btn" id="btnRail" title="Toggle controls  (Tab)" aria-label="Toggle controls panel">◧</button>
     <button class="btn" id="btnInsp" title="Toggle inspector  (I)" aria-label="Toggle inspector panel">◨</button>
@@ -222,7 +223,7 @@
     <div class="vsep"></div>
     <div class="seg" id="segView" style="min-width:290px"></div>
     <div class="vsep"></div>
-    <span class="lbl" style="letter-spacing:.4px">BG</span>
+    <span class="lbl" id="bgLbl" style="letter-spacing:.4px">BG</span>
     <div class="chips" id="backdrops"></div>
     <div class="vsep"></div>
     <button class="btn" id="btnGuides" title="Title &amp; action safe, centre, thirds  (G)">Guides</button>
@@ -289,6 +290,30 @@
     <div class="vsep"></div>
     <button class="btn" id="tGrab" title="Pull this exact frame into the grabber">Grab frame</button>
     <button class="btn" id="tGrabAll" title="Pull the current frame from every instance">Grab all</button>
+  </div>
+
+  <!-- Simple mode: the whole repeat loop on one row. Everything here is the
+       thing he does over and over — look at the graphic, download it, push the
+       next one, download again — and nothing else. -->
+  <div class="simple-bar" id="simpleBar">
+    <div class="sb-left">
+      <button class="btn" id="sbFile" title="Open a local file  (O)">File</button>
+      <button class="btn" id="sbRefresh" title="Re-fetch the URL now, without downloading  (R)">Refresh</button>
+    </div>
+
+    <div class="sb-mid">
+      <span class="sb-size" id="sbSize">1920 × 1080</span>
+      <span class="vsep"></span>
+      <label class="sb-check" title="Fetch the URL again before every download, so a graphic you just pushed is the one you get">
+        <input type="checkbox" id="sbRefetch"> Re-fetch each time
+      </label>
+    </div>
+
+    <div class="sb-right">
+      <span class="sb-next">next<b id="sbNext">clip_001.png</b></span>
+      <button class="btn sm" id="sbReset" title="Start the numbering again at 001">↺</button>
+      <button class="btn primary lg" id="sbDownload" title="Re-fetch, render at full size, save the next clip  (Enter)">Download</button>
+    </div>
   </div>
 
   <div class="stage-bottom">

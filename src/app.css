@@ -88,6 +88,13 @@ body.no-insp main{grid-template-columns:var(--rail) minmax(0,1fr) 0}
 body.no-rail.no-insp main{grid-template-columns:0 minmax(0,1fr) 0}
 
 .rail,.insp{background:var(--bg-2);overflow-y:auto;overflow-x:hidden;min-height:0;scrollbar-width:thin;scrollbar-color:#2c3542 transparent}
+/* Pin each panel to its own column. Without this an item's column depends on
+   how many SIBLINGS are displayed, so hiding the rail with display:none slides
+   the stage into column 1 — which is 0 wide — and the whole viewer vanishes.
+   That shipped: Tab collapsed the stage to nothing in 0.2.0. */
+.rail{grid-column:1}
+.stage{grid-column:2}
+.insp{grid-column:3}
 .rail{border-right:1px solid var(--line)}
 .insp{border-left:1px solid var(--line)}
 body.no-rail .rail,body.no-insp .insp{display:none}
@@ -352,3 +359,36 @@ dialog td:first-child{font-family:var(--mono);color:var(--gold);white-space:nowr
 .transport::-webkit-scrollbar{display:none}
 .t-name{flex:0 1 auto;min-width:92px;max-width:200px;font-weight:600;font-size:12px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .t-time{font-family:var(--mono);font-size:12px;color:var(--ink-2);min-width:62px;text-align:right}
+
+/* ══════════════════ simple mode ══════════════════
+   The default. One job, repeated: look at the graphic, download it, push the
+   next one, download again. Everything that is not that job is behind "Full
+   controls" — still one keystroke away, just not in the way. */
+.simple-bar{display:none}
+body.simple .simple-bar{
+  display:flex;align-items:center;gap:14px;padding:10px 16px;border-top:1px solid var(--line);
+  background:#0d1116cc;backdrop-filter:blur(8px);flex:0 0 auto;
+  overflow-x:auto;scrollbar-width:none;white-space:nowrap}
+body.simple .simple-bar::-webkit-scrollbar{display:none}
+body.simple .sb-left,body.simple .sb-mid,body.simple .sb-right{display:flex;align-items:center;gap:10px;flex:0 0 auto;min-width:0}
+body.simple .sb-mid{flex:1 1 auto;justify-content:center;color:var(--ink-2);font-size:12px;min-width:0}
+body.simple .sb-right{margin-left:auto}
+.sb-size{font-family:var(--mono);font-size:12px;color:var(--ink-2);white-space:nowrap}
+.sb-check{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-2);cursor:pointer;white-space:nowrap}
+.sb-next{display:flex;align-items:baseline;gap:7px;font-size:11px;color:var(--ink-3);letter-spacing:.4px;text-transform:uppercase}
+.sb-next b{font-family:var(--mono);font-size:13px;color:var(--gold);text-transform:none;letter-spacing:0}
+.btn.lg{padding:9px 22px;font-size:14px;font-weight:650}
+.btn.primary{background:var(--gold);color:#0b0e12;border-color:var(--gold)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.primary:disabled{opacity:.45;filter:none}
+
+/* the graphic is the page */
+body.simple .rail,body.simple .insp{display:none}
+body.simple main{grid-template-columns:0 minmax(0,1fr) 0}
+body.simple .stage-bottom{display:none}
+body.simple #segView,body.simple #backdrops,body.simple #btnGuides,body.simple #bgLbl,
+body.simple #segMode,body.simple .stage-top .vsep{display:none}
+body.simple .stage-top{justify-content:flex-end;padding:5px 12px}
+body.simple #btnRail,body.simple #btnInsp{display:none}
+/* live mode still earns its transport, so it is shown when it is in use */
+body.simple .transport[hidden]{display:none}

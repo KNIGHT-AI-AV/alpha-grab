@@ -105,6 +105,13 @@ body.no-insp main{grid-template-columns:var(--rail) minmax(0,1fr) 0}
 body.no-rail.no-insp main{grid-template-columns:0 minmax(0,1fr) 0}
 
 .rail,.insp{background:var(--bg-2);overflow-y:auto;overflow-x:hidden;min-height:0;scrollbar-width:thin;scrollbar-color:#2c3542 transparent}
+/* Pin each panel to its own column. Without this an item's column depends on
+   how many SIBLINGS are displayed, so hiding the rail with display:none slides
+   the stage into column 1 — which is 0 wide — and the whole viewer vanishes.
+   That shipped: Tab collapsed the stage to nothing in 0.2.0. */
+.rail{grid-column:1}
+.stage{grid-column:2}
+.insp{grid-column:3}
 .rail{border-right:1px solid var(--line)}
 .insp{border-left:1px solid var(--line)}
 body.no-rail .rail,body.no-insp .insp{display:none}
@@ -369,6 +376,39 @@ dialog td:first-child{font-family:var(--mono);color:var(--gold);white-space:nowr
 .transport::-webkit-scrollbar{display:none}
 .t-name{flex:0 1 auto;min-width:92px;max-width:200px;font-weight:600;font-size:12px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .t-time{font-family:var(--mono);font-size:12px;color:var(--ink-2);min-width:62px;text-align:right}
+
+/* ══════════════════ simple mode ══════════════════
+   The default. One job, repeated: look at the graphic, download it, push the
+   next one, download again. Everything that is not that job is behind "Full
+   controls" — still one keystroke away, just not in the way. */
+.simple-bar{display:none}
+body.simple .simple-bar{
+  display:flex;align-items:center;gap:14px;padding:10px 16px;border-top:1px solid var(--line);
+  background:#0d1116cc;backdrop-filter:blur(8px);flex:0 0 auto;
+  overflow-x:auto;scrollbar-width:none;white-space:nowrap}
+body.simple .simple-bar::-webkit-scrollbar{display:none}
+body.simple .sb-left,body.simple .sb-mid,body.simple .sb-right{display:flex;align-items:center;gap:10px;flex:0 0 auto;min-width:0}
+body.simple .sb-mid{flex:1 1 auto;justify-content:center;color:var(--ink-2);font-size:12px;min-width:0}
+body.simple .sb-right{margin-left:auto}
+.sb-size{font-family:var(--mono);font-size:12px;color:var(--ink-2);white-space:nowrap}
+.sb-check{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-2);cursor:pointer;white-space:nowrap}
+.sb-next{display:flex;align-items:baseline;gap:7px;font-size:11px;color:var(--ink-3);letter-spacing:.4px;text-transform:uppercase}
+.sb-next b{font-family:var(--mono);font-size:13px;color:var(--gold);text-transform:none;letter-spacing:0}
+.btn.lg{padding:9px 22px;font-size:14px;font-weight:650}
+.btn.primary{background:var(--gold);color:#0b0e12;border-color:var(--gold)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.primary:disabled{opacity:.45;filter:none}
+
+/* the graphic is the page */
+body.simple .rail,body.simple .insp{display:none}
+body.simple main{grid-template-columns:0 minmax(0,1fr) 0}
+body.simple .stage-bottom{display:none}
+body.simple #segView,body.simple #backdrops,body.simple #btnGuides,body.simple #bgLbl,
+body.simple #segMode,body.simple .stage-top .vsep{display:none}
+body.simple .stage-top{justify-content:flex-end;padding:5px 12px}
+body.simple #btnRail,body.simple #btnInsp{display:none}
+/* live mode still earns its transport, so it is shown when it is in use */
+body.simple .transport[hidden]{display:none}
 </style>
 </head>
 <body>
@@ -376,7 +416,7 @@ dialog td:first-child{font-family:var(--mono);color:var(--gold);white-space:nowr
 
 <!-- ══════════════════════════ top bar ══════════════════════════ -->
 <header class="bar">
-  <div class="brand" title="AlphaGrab v0.2.0">
+  <div class="brand" title="AlphaGrab v0.3.0">
     <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
       <defs><clipPath id="lm"><rect x="2" y="2" width="28" height="28" rx="7"/></clipPath></defs>
       <g clip-path="url(#lm)">
@@ -404,6 +444,7 @@ dialog td:first-child{font-family:var(--mono);color:var(--gold);white-space:nowr
       <span class="lbl-hide">File</span>
     </button>
     <input type="file" id="fileInput" class="sr" accept="image/*,.svg,.html,.htm" multiple>
+    <button class="btn" id="btnSimple" title="Switch between the simple grab loop and the full controls  (S)">Full&nbsp;controls</button>
     <button class="btn" id="btnHelp" title="Help &amp; shortcuts  (?)">?</button>
     <button class="btn" id="btnRail" title="Toggle controls  (Tab)" aria-label="Toggle controls panel">◧</button>
     <button class="btn" id="btnInsp" title="Toggle inspector  (I)" aria-label="Toggle inspector panel">◨</button>
@@ -576,7 +617,7 @@ dialog td:first-child{font-family:var(--mono);color:var(--gold);white-space:nowr
     <div class="vsep"></div>
     <div class="seg" id="segView" style="min-width:290px"></div>
     <div class="vsep"></div>
-    <span class="lbl" style="letter-spacing:.4px">BG</span>
+    <span class="lbl" id="bgLbl" style="letter-spacing:.4px">BG</span>
     <div class="chips" id="backdrops"></div>
     <div class="vsep"></div>
     <button class="btn" id="btnGuides" title="Title &amp; action safe, centre, thirds  (G)">Guides</button>
@@ -645,6 +686,30 @@ dialog td:first-child{font-family:var(--mono);color:var(--gold);white-space:nowr
     <button class="btn" id="tGrabAll" title="Pull the current frame from every instance">Grab all</button>
   </div>
 
+  <!-- Simple mode: the whole repeat loop on one row. Everything here is the
+       thing he does over and over — look at the graphic, download it, push the
+       next one, download again — and nothing else. -->
+  <div class="simple-bar" id="simpleBar">
+    <div class="sb-left">
+      <button class="btn" id="sbFile" title="Open a local file  (O)">File</button>
+      <button class="btn" id="sbRefresh" title="Re-fetch the URL now, without downloading  (R)">Refresh</button>
+    </div>
+
+    <div class="sb-mid">
+      <span class="sb-size" id="sbSize">1920 × 1080</span>
+      <span class="vsep"></span>
+      <label class="sb-check" title="Fetch the URL again before every download, so a graphic you just pushed is the one you get">
+        <input type="checkbox" id="sbRefetch"> Re-fetch each time
+      </label>
+    </div>
+
+    <div class="sb-right">
+      <span class="sb-next">next<b id="sbNext">clip_001.png</b></span>
+      <button class="btn sm" id="sbReset" title="Start the numbering again at 001">↺</button>
+      <button class="btn primary lg" id="sbDownload" title="Re-fetch, render at full size, save the next clip  (Enter)">Download</button>
+    </div>
+  </div>
+
   <div class="stage-bottom">
     <div class="seg" id="segFormat" style="min-width:230px"></div>
     <div class="row" id="qualityWrap" style="min-width:150px">
@@ -710,8 +775,8 @@ dialog td:first-child{font-family:var(--mono);color:var(--gold);white-space:nowr
     <summary><span class="dot"></span>About<span class="chev">▶</span></summary>
     <div class="pbody">
       <dl class="kv">
-        <dt>Version</dt><dd>0.2.0</dd>
-        <dt>Build</dt><dd>2026-09-11·1a6bf7ce</dd>
+        <dt>Version</dt><dd>0.3.0</dd>
+        <dt>Build</dt><dd>2026-09-11·7c765557</dd>
         <dt>Canvas limit</dt><dd id="ceilVal">—</dd>
         <dt>Network</dt><dd>fetch only</dd>
       </dl>
@@ -810,8 +875,8 @@ http.createServer(async (req, res) => {
 'use strict';
 
 const AG = window.AG = {
-  VERSION: '0.2.0',
-  BUILD:   '2026-09-11·1a6bf7ce',
+  VERSION: '0.3.0',
+  BUILD:   '2026-09-11·7c765557',
 
   /* Advertised limits. tests/guard.mjs pins the marketing copy to these. */
   MAX_DIM: 8192,          // largest side offered by the UI (probe may allow more)
@@ -820,6 +885,15 @@ const AG = window.AG = {
   SETTLE_MAX: 30000,      // ms an HTML template may run before capture
   MAX_INSTANCES: 8,       // live graphics running at once in the multiviewer
   STEP_FPS: 25,           // frame size the transport steps by, in fps
+  SEQ_PAD: 3,             // clip numbering: 001, 002, ... up to SEQ_MAX
+  SEQ_MAX: 999,
+
+  /* A relay we run, offered ONLY when a host refuses to share its pixels and
+     the visitor asks for it. Off by default: a relay sees every URL routed
+     through it, and "nothing is uploaded" has to keep being true for anyone
+     who never turns it on. It moves bytes; rendering, keying and encoding
+     still happen in the browser. */
+  RELAY: 'https://relay-production-057e.up.railway.app/p/{url}',
 
   /* Output formats offered in the export bar. */
   FORMATS: [
@@ -1032,6 +1106,17 @@ const S = AG.state = {
     format: 'png', quality: 0.92, matteColor: '#000000',
     fillMode: 'straight',      // straight | overBlack | overMatte
     filename: '{name}_{w}x{h}',
+    /* the repeat loop: same URL, new graphic pushed to it, download again.
+       `clipName` carries {n}, which is `seq` zero-padded; `seq` advances on
+       every saved clip and is persisted, so closing the tab does not restart
+       the numbering mid-session. `refetch` is what makes the loop honest —
+       without it Download would re-export the frame already in memory and hand
+       back the same graphic under a new number, which looks exactly like
+       working. */
+    ui: 'simple',              // simple | full
+    clipName: 'clip_{n}',
+    seq: 1,
+    refetch: true,
     /* fetch */
     proxy: '', useProxy: false, settle: 900, autoRun: true,
     /* design canvas an HTML template lays out on before it is scaled */
@@ -1076,9 +1161,13 @@ function normalizeUrl(raw){
   return new URL(s).href;
 }
 
-/* An error that carries a human diagnosis and a suggested fix. */
+/* An error that carries a human diagnosis, a suggested fix, and — when there is
+   one — the name of an action that performs it. A wall of text telling someone
+   what they could do is worse than a button that does it. */
 class AGError extends Error {
-  constructor(msg, detail, fix){ super(msg); this.detail = detail || ''; this.fix = fix || ''; }
+  constructor(msg, detail, fix, action){
+    super(msg); this.detail = detail || ''; this.fix = fix || ''; this.action = action || '';
+  }
 }
 
 function proxied(url){
@@ -1125,8 +1214,10 @@ async function fetchWithFallback(url){
     throw new AGError('Could not reach that URL',
       'No response from the server — check the address, or that the host is up.');
   throw new AGError('Blocked by CORS',
-    'The server answered, but it does not send <code>Access-Control-Allow-Origin</code>, so the browser will not let this page read the pixels.',
-    'Drag the file in instead, or switch on a CORS proxy in <b>Source → Fetch</b>.');
+    'The server answered, but it does not send <code>Access-Control-Allow-Origin</code>, so the browser will not let this page read the pixels. ' +
+    'That is the host’s choice and nothing here can change it — it is not a fault in this tool.',
+    'Press <b>Use the relay</b> below to fetch it through a small server we run, or drag the file in instead.',
+    'relay');
 }
 
 /* ─────────────────────────── public loaders ─────────────────────────── */
@@ -1138,7 +1229,26 @@ async function loadFromUrl(raw){
   const buf = await res.arrayBuffer();
   const src = await classify(buf, ct, url);
   src.via = via;
+  src.hash = bytesHash(buf);
   return src;
+}
+
+/* A fingerprint of exactly what the server just sent. Used to answer one
+   question in the repeat loop: "is this actually a new graphic?"
+
+   The failure it exists to catch is silent. Push a graphic, download, push the
+   next one, download again — if the second push has not landed yet the server
+   returns the same bytes, the export succeeds, the clip number advances, and
+   you end up with clip_004.png that is a duplicate of clip_003.png. Nothing
+   errors. You find out in the edit.
+
+   FNV-1a over the whole buffer: not cryptographic, but this is comparing a
+   response against the one before it, not defending against an adversary. */
+function bytesHash(buf){
+  const b = new Uint8Array(buf);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < b.length; i++) { h ^= b[i]; h = Math.imul(h, 0x01000193); }
+  return ((h >>> 0).toString(16).padStart(8, '0')) + ':' + b.length;
 }
 
 async function loadFromFile(file){
@@ -2429,8 +2539,10 @@ function boot(){
   bindKeys();
   bindDropAndPaste();
   bindLive();
+  bindSimple();
   renderRecent();
   renderUserPresets();
+  setUiMode(S.opts.ui || 'simple');
   syncControls();
 
   if (!readPermalink()) {
@@ -2606,6 +2718,7 @@ function syncControls(){
   const o = S.opts;
   segSyncs.forEach(f => f());
   if ($('#mv')) syncLiveView();
+  if ($('#simpleBar')) syncSimple();
   const v = (id, val) => { const n = $(id); if (n && document.activeElement !== n) n.value = val; };
   v('#tolerance', o.tolerance); v('#softness', o.softness); v('#spill', o.spill);
   v('#lumaLo', o.lumaLo); v('#lumaHi', o.lumaHi);
@@ -2689,7 +2802,9 @@ async function loadDemo(id){
 async function setSource(src){
   S.source = src;
   if (src.kind === 'dom') { src.w = S.opts.domW; src.h = S.opts.domH; }
-  if (S.opts.sizeMode === 'custom' || S.opts.sizeMode === 'native') { S.opts.outW = src.w; S.opts.outH = src.h; }
+  /* Simple mode owns the output frame (1920x1080) — a new source adopting its
+     own size would silently change what a switcher receives mid-session. */
+  if (S.opts.ui !== 'simple' && (S.opts.sizeMode === 'custom' || S.opts.sizeMode === 'native')) { S.opts.outW = src.w; S.opts.outH = src.h; }
   $('#empty').style.display = 'none';
   S.fit = true;
 
@@ -3205,6 +3320,11 @@ function bindKeys(){
     else if (k === 'g') { $('#btnGuides').click(); }
     else if (k === 'k') { togglePick(); }
     else if (k === 'i') { document.body.classList.toggle('no-insp'); layout(); }
+    else if (k === 's') { setUiMode(S.opts.ui === 'simple' ? 'full' : 'simple'); }
+    else if (e.key === 'Enter' && S.opts.ui === 'simple' && S.source && document.activeElement !== $('#url')) {
+      e.preventDefault(); downloadClip().catch(showError);
+    }
+    else if (k === 'r' && S.opts.ui === 'simple') { refreshSource(true).catch(showError); }
     else if (k === 'l') { MODE = MODE === 'live' ? 'grab' : 'live'; syncControls(); }
     else if (e.key === ' ' && MODE === 'live') {
       const i = liveActive(); if (i) { e.preventDefault(); i.playing ? instPause(i) : instPlay(i); syncTransport(); }
@@ -3227,7 +3347,8 @@ function bindKeys(){
 function showError(e){
   if (!e) return;
   const detail = (e.detail || '') + (e.fix ? `<br><b style="color:var(--gold)">${e.fix}</b>` : '');
-  toast(e.message || 'Something went wrong', detail || (e.stack ? '' : String(e)), 'err');
+  const t = toast(e.message || 'Something went wrong', detail || (e.stack ? '' : String(e)), 'err');
+  if (t && e.action === 'relay') addRelayAction(t);
   if (!(e instanceof AGError)) console.error('[AlphaGrab]', e);
 }
 window.addEventListener('error', ev => { if (ev.error) console.error('[AlphaGrab]', ev.error); });
@@ -3413,6 +3534,147 @@ async function grabAll(){
     syncControls();
   }
   toast('Grabbed', `${ok} of ${LIVE.list.length} instances exported.`, ok ? 'ok' : 'warn');
+}
+
+/* The one-click way out of a CORS refusal. Turning the relay on is a real
+   decision — it routes the URL through a server we run — so it is offered here,
+   in the moment it would help, with what it means said in the same breath, and
+   never switched on quietly. */
+function addRelayAction(t){
+  if (!t) return;
+  const row = el('div', { style: { marginTop: '9px', display: 'flex', gap: '8px', alignItems: 'center' } });
+  const go = el('button', { className: 'btn primary sm', textContent: 'Use the relay' });
+  const why = el('span', { style: { fontSize: '11px', color: 'var(--ink-3)' }, textContent: 'routes this URL through our server' });
+  on(go, 'click', async () => {
+    S.opts.proxy = AG.RELAY; S.opts.useProxy = true; saveOpts(); syncControls();
+    t.remove();
+    const url = ($('#url').value || '').trim() || (S.source && S.source.url);
+    if (url) { try { await grabUrl(url); } catch (err) { showError(err); } }
+    else toast('Relay on', 'Press Grab again.', 'ok');
+  });
+  row.append(go, why);
+  t.append(row);
+}
+
+/* ═══════════════════ simple mode: the repeat loop ═══════════════════
+   One job, done over and over: look at the graphic, download it, push the next
+   one to the same URL, download again. Simple mode is that loop and nothing
+   else — 1920x1080 out, alpha intact, the clip number doing the remembering.  */
+
+function bindSimple(){
+  on($('#btnSimple'), 'click', () => setUiMode(S.opts.ui === 'simple' ? 'full' : 'simple'));
+  on($('#sbFile'),    'click', () => $('#fileInput').click());
+  on($('#sbReset'),   'click', () => { S.opts.seq = 1; saveOpts(); syncSimple(); toast('Numbering reset', 'The next clip is 001.', 'ok'); });
+  on($('#sbRefresh'), 'click', () => refreshSource(true).catch(showError));
+  on($('#sbRefetch'), 'change', e => { S.opts.refetch = e.target.checked; saveOpts(); syncSimple(); });
+  on($('#sbDownload'),'click', () => downloadClip().catch(showError));
+}
+
+function setUiMode(mode){
+  S.opts.ui = mode === 'full' ? 'full' : 'simple';
+  document.body.classList.toggle('simple', S.opts.ui === 'simple');
+  $('#btnSimple').textContent = S.opts.ui === 'simple' ? 'Full controls' : 'Simple';
+  /* Simple mode is a broadcast frame, not "whatever the source happened to be":
+     1920x1080, contained, transparent where the graphic does not paint. A
+     lower third that lays out at 1280x720 still lands in a 1080 frame in its
+     own position, which is the only form a switcher can use. */
+  if (S.opts.ui === 'simple') {
+    S.opts.sizeMode = 'custom'; S.opts.outW = 1920; S.opts.outH = 1080;
+    S.opts.fitMode = 'contain'; S.opts.padColor = '#00000000';
+    S.fit = true;
+  }
+  saveOpts(); syncControls(); layout();
+  if (S.source) rerun(true);
+}
+
+const clipName = (ext, d) => renderTemplate(S.opts.clipName || 'clip_{n}', {
+  name: (S.source && S.source.name) || 'clip', w: d ? d.width : S.opts.outW, h: d ? d.height : S.opts.outH,
+  ext, n: S.opts.seq,
+  host: (() => { try { return new URL(S.source.url).hostname.replace(/^www\./, ''); } catch (_) { return 'local'; } })()
+});
+
+function syncSimple(){
+  const n = $('#sbNext');
+  if (n) {
+    const fmt = AG.FORMATS.find(f => f.id === S.opts.format) || AG.FORMATS[0];
+    n.textContent = clipName(fmt.ext, null);
+  }
+  const s = $('#sbSize'); if (s) s.textContent = `${S.opts.outW} × ${S.opts.outH}`;
+  const r = $('#sbRefetch'); if (r && document.activeElement !== r) r.checked = !!S.opts.refetch;
+  const d = $('#sbDownload'); if (d) d.disabled = !S.source;
+  const rf = $('#sbRefresh');
+  if (rf) rf.disabled = !(S.source && S.source.url);
+}
+
+/* Re-fetch the source URL and rebuild from it. This is the whole reason the
+   loop works: without it Download would re-encode the frame already in memory
+   and hand back the graphic from three pushes ago under a brand new number. */
+async function refreshSource(announce){
+  const url = S.source && S.source.url;
+  if (!url) { if (announce) toast('Nothing to re-fetch', 'This came from a local file, not a URL.', 'warn'); return null; }
+  const before = S.source.hash;
+  const fresh = await loadFromUrl(url);
+  const old = S.source.inst;
+  if (old) { if (old.tile) old.tile.remove(); old.tile = null; disposeInstance(old); }
+  await setSource(fresh);
+  const same = !!(before && fresh.hash && before === fresh.hash);
+  if (announce) {
+    same ? toast('Re-fetched — unchanged', 'The server returned byte-identical content.', 'warn')
+         : toast('Re-fetched', 'A new graphic is on the URL.', 'ok');
+  }
+  return same;
+}
+
+async function downloadClip(){
+  if (!S.source) throw new AGError('Nothing to download', 'Grab a URL or open a file first.');
+  const btn = $('#sbDownload');
+  btn.disabled = true;
+  const done = busy('Grabbing the frame…');
+  try {
+    let same = false;
+    if (S.opts.refetch && S.source.url) same = await refreshSource(false);
+
+    await raf();
+    const d = await fullFrame();
+    const { blob, fmt } = await encodeFrame(d, S.opts.format, S.opts);
+    const fn = clipName(fmt.ext, d);
+    saveBlob(blob, fn);
+
+    const was = S.opts.seq;
+    S.opts.seq = Math.min(AG.SEQ_MAX, (S.opts.seq | 0) + 1);
+    saveOpts(); syncSimple();
+
+    /* An empty frame is the other silent one. A live viz with nothing on air
+       exports a perfectly valid, perfectly transparent 1920x1080 PNG — right
+       size, right format, real alpha, no content. It only announces itself in
+       the edit, by which time there are thirty of them. */
+    /* Simple mode exists to produce a keyable frame. JPEG cannot carry alpha,
+       and the only visible sign is three characters in the filename — so a
+       whole session can be flattened onto a matte before anyone notices. */
+    const fmtDef = AG.FORMATS.find(f => f.id === S.opts.format);
+    if (fmtDef && !fmtDef.alpha) {
+      toast('No alpha in this format',
+        `<code>${fmtDef.label}</code> cannot carry transparency — <code>${fn}</code> is flattened onto the matte colour. ` +
+        `Switch to PNG, WebP or TGA for a keyable frame.`, 'warn', 8000);
+    }
+    const empty = !S.stats || S.stats.coverage === 0 || S.stats.clearRatio >= 0.9999;
+    if (empty) {
+      toast('Saved, but the frame is empty',
+        `<code>${fn}</code> is fully transparent — nothing was painted. ` +
+        `If this is a live viz, check a graphic is actually on air, then download again.`, 'warn', 8000);
+    }
+    /* Say it when two clips came from the same bytes. The export succeeded and
+       the number advanced, so nothing looks wrong — and a folder of identical
+       "clips" is only discovered later, in the edit. */
+    else if (same) {
+      toast('Saved, but it has not changed',
+        `<code>${fn}</code> came from byte-identical content to clip ${String(was - 1).padStart(AG.SEQ_PAD, '0')}. ` +
+        `Push the next graphic to the URL, then download again.`, 'warn', 7000);
+    } else {
+      const a = S.stats && S.stats.clearRatio != null ? ` · ${(S.stats.clearRatio * 100).toFixed(0)}% clear` : '';
+      toast('Saved', `<code>${fn}</code> · ${d.width} × ${d.height} · ${bytes(blob.size)}${a}`, 'ok');
+    }
+  } finally { done(); btn.disabled = !S.source; }
 }
 
 /* go */

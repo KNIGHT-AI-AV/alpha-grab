@@ -15,6 +15,15 @@ const AG = window.AG = {
   SETTLE_MAX: 30000,      // ms an HTML template may run before capture
   MAX_INSTANCES: 8,       // live graphics running at once in the multiviewer
   STEP_FPS: 25,           // frame size the transport steps by, in fps
+  SEQ_PAD: 3,             // clip numbering: 001, 002, ... up to SEQ_MAX
+  SEQ_MAX: 999,
+
+  /* A relay we run, offered ONLY when a host refuses to share its pixels and
+     the visitor asks for it. Off by default: a relay sees every URL routed
+     through it, and "nothing is uploaded" has to keep being true for anyone
+     who never turns it on. It moves bytes; rendering, keying and encoding
+     still happen in the browser. */
+  RELAY: 'https://relay-production-057e.up.railway.app/p/{url}',
 
   /* Output formats offered in the export bar. */
   FORMATS: [
@@ -227,6 +236,17 @@ const S = AG.state = {
     format: 'png', quality: 0.92, matteColor: '#000000',
     fillMode: 'straight',      // straight | overBlack | overMatte
     filename: '{name}_{w}x{h}',
+    /* the repeat loop: same URL, new graphic pushed to it, download again.
+       `clipName` carries {n}, which is `seq` zero-padded; `seq` advances on
+       every saved clip and is persisted, so closing the tab does not restart
+       the numbering mid-session. `refetch` is what makes the loop honest —
+       without it Download would re-export the frame already in memory and hand
+       back the same graphic under a new number, which looks exactly like
+       working. */
+    ui: 'simple',              // simple | full
+    clipName: 'clip_{n}',
+    seq: 1,
+    refetch: true,
     /* fetch */
     proxy: '', useProxy: false, settle: 900, autoRun: true,
     /* design canvas an HTML template lays out on before it is scaled */

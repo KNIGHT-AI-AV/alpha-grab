@@ -21,9 +21,13 @@ function normalizeUrl(raw){
   return new URL(s).href;
 }
 
-/* An error that carries a human diagnosis and a suggested fix. */
+/* An error that carries a human diagnosis, a suggested fix, and — when there is
+   one — the name of an action that performs it. A wall of text telling someone
+   what they could do is worse than a button that does it. */
 class AGError extends Error {
-  constructor(msg, detail, fix){ super(msg); this.detail = detail || ''; this.fix = fix || ''; }
+  constructor(msg, detail, fix, action){
+    super(msg); this.detail = detail || ''; this.fix = fix || ''; this.action = action || '';
+  }
 }
 
 function proxied(url){
@@ -70,8 +74,10 @@ async function fetchWithFallback(url){
     throw new AGError('Could not reach that URL',
       'No response from the server — check the address, or that the host is up.');
   throw new AGError('Blocked by CORS',
-    'The server answered, but it does not send <code>Access-Control-Allow-Origin</code>, so the browser will not let this page read the pixels.',
-    'Drag the file in instead, or switch on a CORS proxy in <b>Source → Fetch</b>.');
+    'The server answered, but it does not send <code>Access-Control-Allow-Origin</code>, so the browser will not let this page read the pixels. ' +
+    'That is the host’s choice and nothing here can change it — it is not a fault in this tool.',
+    'Press <b>Use the relay</b> below to fetch it through a small server we run, or drag the file in instead.',
+    'relay');
 }
 
 /* ─────────────────────────── public loaders ─────────────────────────── */
@@ -83,7 +89,26 @@ async function loadFromUrl(raw){
   const buf = await res.arrayBuffer();
   const src = await classify(buf, ct, url);
   src.via = via;
+  src.hash = bytesHash(buf);
   return src;
+}
+
+/* A fingerprint of exactly what the server just sent. Used to answer one
+   question in the repeat loop: "is this actually a new graphic?"
+
+   The failure it exists to catch is silent. Push a graphic, download, push the
+   next one, download again — if the second push has not landed yet the server
+   returns the same bytes, the export succeeds, the clip number advances, and
+   you end up with clip_004.png that is a duplicate of clip_003.png. Nothing
+   errors. You find out in the edit.
+
+   FNV-1a over the whole buffer: not cryptographic, but this is comparing a
+   response against the one before it, not defending against an adversary. */
+function bytesHash(buf){
+  const b = new Uint8Array(buf);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < b.length; i++) { h ^= b[i]; h = Math.imul(h, 0x01000193); }
+  return ((h >>> 0).toString(16).padStart(8, '0')) + ':' + b.length;
 }
 
 async function loadFromFile(file){

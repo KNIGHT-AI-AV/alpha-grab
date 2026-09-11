@@ -1,5 +1,55 @@
 # AlphaGrab changelog
 
+## 0.3.0 - 2026-09-11
+
+Simple mode, and the repeat loop it exists for: look at the graphic, download
+it, push the next one to the same URL, download again.
+
+- **Simple mode is now the default.** The graphic fills the screen, 16:9 and
+  centred on a checkerboard, with one row of controls under it. Everything else
+  is behind **Full controls** (`S`), one keystroke away.
+- **Always a full 1920x1080 broadcast frame**, whatever size the source lays out
+  at - contained, transparent where the graphic does not paint. A frame whose
+  size follows the source is no use to a switcher.
+- **Clip numbering that does the remembering.** `clip_001.png`, `clip_002.png`,
+  ... The bar shows the next name *before* you press Download, and the counter
+  survives a reload. `Enter` downloads, `R` re-fetches, the reset arrow returns
+  to 001.
+- **Download re-fetches the URL first** (on by default). Without this the button
+  would re-encode the frame already in memory and hand back an older graphic
+  under a new number - which looks exactly like working.
+- **A relay for hosts that refuse CORS.** Broadcast graphics platforms serve
+  their viz pages without `Access-Control-Allow-Origin` and are third parties,
+  so nobody using this tool can add the header. A CORS refusal now carries a
+  one-click **Use the relay** button. It is **off until you press it**: a relay
+  sees every URL routed through it, and rendering, keying and encoding still
+  happen in the browser either way.
+
+### Three silent failures now say something
+
+Each of these produces a valid file of the right size and format, so nothing
+looks wrong until the edit:
+
+- **The URL has not changed.** Two clips from byte-identical content are named
+  and reported as such, so a duplicate is caught at the moment it is made.
+- **The frame is empty.** A live viz with nothing on air exports a perfect,
+  perfectly transparent 1080p PNG. It is now called out.
+- **The format cannot carry alpha.** JPEG flattens onto the matte and announces
+  it in three characters of filename; now it says so.
+
+### One defect fixed that was already shipped
+
+**Hiding a panel collapsed the viewer to zero width.** The rail, stage and
+inspector are grid items with no explicit column, so `display:none` on the rail
+slid the stage into column 1 - which is 0 wide - and the whole viewer vanished.
+Pressing `Tab` did it in 0.2.0. Each panel is now pinned to its own column, and
+a check measures the stage in all five panel combinations.
+
+Verification: 46 guard checks and 90 Chromium checks, up from 46 and 81, run
+three times for stability. The new ones prove the numbering advances on its own,
+that a 300x150 template still exports 1920x1080, and that an all-transparent
+clip is reported rather than saved quietly.
+
 ## 0.2.0 - 2026-09-11
 
 Live instances. A production switcher does not show you a still of a graphic, it

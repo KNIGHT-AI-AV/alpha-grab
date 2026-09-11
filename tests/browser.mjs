@@ -66,6 +66,13 @@ window.__decode = async (blob) => {
   return { w:bmp.width, h:bmp.height, clear, opaque, semi, type:blob.type, size:blob.size };
 };`});
 
+/* Simple mode is the default and hides the rail and inspector, so every check
+   below that reaches for a panel control must say which UI it is testing.
+   Forcing full mode here keeps those checks honest instead of passing because
+   the control was merely absent. Simple mode gets its own section at the end. */
+await page.evaluate(() => setUiMode('full'));
+await page.waitForTimeout(200);
+
 group('page loads clean');
 is(errors.length === 0, 'no console or page errors on load', errors[0]);
 is(await page.title() !== '', 'has a title: ' + await page.title());
@@ -391,10 +398,16 @@ is(inst0.ready && inst0.attached, 'its iframe is mounted and same-origin readabl
 group('the monitor is live, not a still');
 const moving = await page.evaluate(async () => {
   const i = liveActive();
-  instPlay(i);
+  /* Park at a known point inside the timeline first. Calling play() on an
+     animation that has already run to its forwards fill leaves it holding the
+     end frame, and two reads of a held frame are identical — which looks like
+     "the monitor is dead" when it is only finished. Then let one frame pass so
+     the seek has reached computed style before the first sample. */
+  instSeek(i, 0); instPlay(i);
   const read = () => { const d = i.frame.contentDocument; return d.defaultView.getComputedStyle(d.getElementById('b')).backgroundColor; };
+  await new Promise(r => requestAnimationFrame(() => r()));
   const a = read();
-  await new Promise(r => setTimeout(r, 220));
+  await new Promise(r => setTimeout(r, 300));
   return { a, b: read() };
 });
 is(moving.a !== moving.b, `the graphic keeps painting on its own: ${moving.a} -> ${moving.b}`);
@@ -510,6 +523,92 @@ const laidOut = await page.evaluate(() => {
 });
 is(laidOut.off && !laidOut.hidden, 'it is hidden with visibility, not [hidden]');
 is(laidOut.w > 0 && laidOut.h > 0, `so the instances still have a layout box: ${laidOut.w} x ${laidOut.h}`);
+
+/* ══════════════ simple mode: the repeat loop ══════════════
+   The loop is: look at the graphic, download it, push the next one to the same
+   URL, download again. What must hold is that the numbering advances on its
+   own, the frame is a full 1080 broadcast frame whatever the source size, and
+   the two silent failures — an unchanged URL and an empty frame — are said out
+   loud rather than saved quietly. */
+group('simple mode is the default and gets out of the way');
+const simple = await page.evaluate(() => {
+  setUiMode('simple');
+  const vis = s => { const n = document.querySelector(s); return !!(n && n.getClientRects().length); };
+  return { cls: document.body.classList.contains('simple'), bar: vis('#simpleBar'),
+           rail: vis('#rail'), insp: vis('.insp'), full: vis('#stageBottom') || vis('.stage-bottom') };
+});
+is(simple.cls && simple.bar, 'the simple bar is the visible control surface');
+is(!simple.rail && !simple.insp, 'the rail and inspector are out of the way');
+
+group('the viewer keeps its width in every panel combination');
+/* This shipped broken in 0.2.0 and no check caught it: the panels are grid
+   items with no explicit column, so hiding one with display:none slid the stage
+   into column 1 — width 0 — and the viewer disappeared. Pressing Tab did it. */
+const widths = await page.evaluate(() => {
+  const keep = document.body.className;
+  const w = c => { document.body.className = c; return Math.round(document.querySelector('.stage').getBoundingClientRect().width); };
+  const out = { full: w(''), noRail: w('no-rail'), noInsp: w('no-insp'), neither: w('no-rail no-insp'), simple: w('simple') };
+  document.body.className = keep;
+  return out;
+});
+is(Object.values(widths).every(v => v > 300),
+   `the stage stays visible with any panel hidden: ${Object.entries(widths).map(([k, v]) => k + '=' + v).join(' ')}`);
+
+group('simple mode always exports a full 1080 broadcast frame');
+const pinned = await page.evaluate(async () => {
+  /* a 300x150 source must still come out 1920x1080, letterboxed in transparency
+     — a switcher cannot use a frame whose size follows whatever was loaded */
+  const src = await loadFromUrl('data:text/html,' + encodeURIComponent(
+    '<body style="margin:0"><div style="position:absolute;left:20px;top:20px;width:120px;height:40px;background:#ffb020"></div></body>'));
+  AG.state.opts.settle = 60; AG.state.opts.domW = 300; AG.state.opts.domH = 150;
+  await setSource(src);
+  const d = await fullFrame();
+  return { w: d.width, h: d.height, mode: AG.state.opts.sizeMode };
+});
+is(pinned.w === 1920 && pinned.h === 1080, `a 300x150 template still exports ${pinned.w} x ${pinned.h}`);
+
+group('clip numbering advances by itself');
+const seq = await page.evaluate(async () => {
+  AG.state.opts.seq = 1; AG.state.opts.refetch = false; AG.state.opts.format = 'png'; syncControls();
+  const names = [];
+  const real = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function(){ if (this.download) names.push(this.download); };
+  const preview1 = document.getElementById('sbNext').textContent;
+  await downloadClip();
+  const preview2 = document.getElementById('sbNext').textContent;
+  await downloadClip();
+  await downloadClip();
+  HTMLAnchorElement.prototype.click = real;
+  const afterReset = (() => { AG.state.opts.seq = 1; syncControls(); return document.getElementById('sbNext').textContent; })();
+  return { names, preview1, preview2, afterReset, seq: AG.state.opts.seq };
+});
+is(seq.names.join(',') === 'clip_001.png,clip_002.png,clip_003.png', `three downloads numbered themselves: ${seq.names.join(' ')}`);
+is(seq.preview1 === 'clip_001.png' && seq.preview2 === 'clip_002.png',
+   `the bar shows the name BEFORE you press it, and moves on after: ${seq.preview1} -> ${seq.preview2}`);
+is(seq.afterReset === 'clip_001.png', 'reset returns the numbering to 001');
+
+group('the two silent failures are said out loud');
+const quiet = await page.evaluate(async () => {
+  document.querySelectorAll('.toast').forEach(t => t.remove());
+  /* nothing painted anywhere: a valid, correctly sized, completely empty frame */
+  const src = await loadFromUrl('data:text/html,' + encodeURIComponent('<body style="margin:0"></body>'));
+  AG.state.opts.settle = 40; AG.state.opts.refetch = false; AG.state.opts.format = 'png'; AG.state.opts.seq = 1;
+  await setSource(src);
+  const real = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function(){};
+  await downloadClip();
+  HTMLAnchorElement.prototype.click = real;
+  return [...document.querySelectorAll('.toast')].map(t => t.textContent).join(' | ');
+});
+is(/empty/i.test(quiet), `an all-transparent clip is reported, not saved quietly: "${quiet.slice(0, 72)}"`);
+
+const corsAction = await page.evaluate(() => {
+  const src = read => read;
+  const e = new AGError('Blocked by CORS', 'd', 'f', 'relay');
+  return { action: e.action, relay: typeof AG.RELAY === 'string' && /^https:\/\//.test(AG.RELAY) };
+});
+is(corsAction.action === 'relay' && corsAction.relay,
+   'a CORS refusal carries a one-click relay action rather than a paragraph of advice');
 
 group('no errors accumulated across the whole run');
 is(errors.length === 0, 'still no console or page errors', errors.slice(0, 3).join(' | '));
