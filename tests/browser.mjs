@@ -729,6 +729,50 @@ is(raised > 1000, `and raising the settle window recovers it: ${raised} painted 
 is(await page.evaluate(() => AG.state.opts.settle >= 2000 || true) && true,
    'the default settle is tuned for a feed-driven template, not a static one');
 
+/* ══════════════ the empty stage is empty ══════════════
+   Reported from his screen: "the checkered background design that's only in the
+   top left corner is weird." It was a real artefact — an unsized <canvas> is
+   300x150 by default and #cvBg paints a checkerboard into it, so before anything
+   was loaded the stack sat in the corner showing through from under the empty
+   state. Nothing had ever measured the app with no source in it. */
+group('nothing is painted before a source is loaded');
+const emptyStage = await page.evaluate(() => {
+  const keepSrc = AG.state.source, keepPrev = AG.state.outPreview;
+  AG.state.source = null; AG.state.outPreview = null; syncControls();
+  const pan = document.querySelector('#pan');
+  const r = pan.getBoundingClientRect();
+  const out = { hasClass: document.body.classList.contains('has-source'),
+                panBox: Math.round(r.width) + 'x' + Math.round(r.height),
+                emptyShown: !!document.querySelector('#empty').getClientRects().length };
+  AG.state.source = keepSrc; AG.state.outPreview = keepPrev; syncControls();
+  out.backAfter = document.body.classList.contains('has-source');
+  return out;
+});
+is(!emptyStage.hasClass && emptyStage.panBox === '0x0',
+   `with no source the canvas stack has no box at all: ${emptyStage.panBox}`);
+is(emptyStage.emptyShown, 'and the empty state is what fills the stage');
+is(emptyStage.backAfter, 'the canvas comes back as soon as a source exists');
+
+group('a toast message reads as a sentence, not as fragments');
+/* `.toast b` was a descendant selector, so inline emphasis inside a message
+   inherited display:block and each bold phrase took its own line. Reported from
+   a screenshot: "…arrived after the / 4000 ms / settle window". */
+const toastLines = await page.evaluate(async () => {
+  document.querySelectorAll('.toast').forEach(t => t.remove());
+  toast('Title here', 'plain words <b>bold bit</b> then more words that continue the same sentence', 'warn', 6000);
+  await new Promise(r => requestAnimationFrame(() => r()));
+  const t = document.querySelector('.toast');
+  const title = t.querySelector(':scope > div > b');
+  const inner = t.querySelector('span b');
+  return { titleDisplay: getComputedStyle(title).display, innerDisplay: getComputedStyle(inner).display };
+});
+is(toastLines.titleDisplay === 'block', 'the toast title is still its own line');
+is(toastLines.innerDisplay === 'inline',
+   `emphasis inside the message stays in the sentence: display ${toastLines.innerDisplay}`);
+
+group('a portrait phone is asked to turn');
+const rot = await page.evaluate(() => !!document.querySelector('#rotate'));
+is(rot, 'the rotate prompt exists in the page');
 group('no errors accumulated across the whole run');
 is(errors.length === 0, 'still no console or page errors', errors.slice(0, 3).join(' | '));
 

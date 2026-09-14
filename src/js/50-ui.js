@@ -66,6 +66,10 @@ function boot(){
   bindDropAndPaste();
   bindLive();
   bindSimple();
+  /* The only JS the rotate prompt needs: a way out for anyone who genuinely
+     wants it upright. Whether it SHOWS is CSS's decision, so it can never
+     disagree with the actual orientation. */
+  on($('#rotateOk'), 'click', () => document.body.classList.add('rotate-ok'));
   renderRecent();
   renderUserPresets();
   setUiMode(S.opts.ui || 'simple');
@@ -252,6 +256,11 @@ const gcd = (a, b) => b ? gcd(b, a % b) : (a || 1);
 
 function syncControls(){
   const o = S.opts;
+  /* An unsized <canvas> is 300x150 by default, and #cvBg paints a checkerboard
+     into it — so before anything is loaded the stack sat in the top-left corner
+     as a small checkered rectangle poking out from under the empty state. It
+     looked like a rendering artefact because that is exactly what it was. */
+  document.body.classList.toggle('has-source', !!S.source);
   segSyncs.forEach(f => f());
   if ($('#mv')) syncLiveView();
   if ($('#simpleBar')) syncSimple();

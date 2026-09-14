@@ -20,6 +20,17 @@
 <body>
 <div id="app">
 
+<!-- Portrait phone: ask for a turn. CSS decides when this shows. -->
+<div class="rotate" id="rotate">
+  <svg width="54" height="54" viewBox="0 0 24 24" fill="none" stroke="#ffb020" stroke-width="1.6"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>
+  </svg>
+  <h2>Turn your phone sideways</h2>
+  <p>AlphaGrab shows a 16:9 broadcast frame. Landscape gives it the whole screen — upright it is a letterbox too small to judge an edge or a matte on.</p>
+  <button class="btn" id="rotateOk">Carry on upright</button>
+</div>
+
 <!-- ══════════════════════════ top bar ══════════════════════════ -->
 <header class="bar">
   <div class="brand" title="AlphaGrab v__VERSION__">

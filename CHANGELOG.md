@@ -1,5 +1,28 @@
 # AlphaGrab changelog
 
+## 0.3.4 - 2026-09-14
+
+Three things reported off a real screen.
+
+- **The checkerboard in the corner.** Before anything was loaded, the canvas
+  stack sat at its browser-default **300x150** in the top-left, still painting
+  its transparency checkerboard, poking out from under the empty state. It read
+  as a rendering artefact because it was one. The stack now has no box at all
+  until there is a source. Nothing had ever measured the app with *nothing* in
+  it.
+- **Portrait phones are asked to turn.** The viewer is a 16:9 broadcast frame;
+  upright it is a letterbox a third of the screen tall, too small to judge an
+  edge or a matte on. A portrait phone or tablet now gets a rotate prompt, with
+  "Carry on upright" for anyone who means it. CSS decides when it shows, so it
+  cannot disagree with the real orientation. Landscape phones also drop the
+  wordmark and the zoom row to give the frame every pixel.
+- **Toast messages read as sentences again.** `.toast b` was a descendant
+  selector, so every inline bold in a message body inherited `display:block` and
+  took its own line - "...arrived after the / 4000 ms / settle window". Scoped to
+  the title.
+
+46 guard + 114 Chromium.
+
 ## 0.3.3 - 2026-09-14
 
 **The settle control governed a code path nothing used any more.** Found while

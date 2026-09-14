@@ -280,7 +280,13 @@ body.dragging .dropzone{display:flex}
 }
 .toast.err{border-left-color:var(--red)}
 .toast.ok{border-left-color:var(--green)}
-.toast b{display:block;margin-bottom:2px}
+/* The TITLE is a block; emphasis inside the message is not. `.toast b` was a
+   descendant selector, so every <b> in a message body became its own line and a
+   sentence arrived as fragments — "…arrived after the / 4000 ms / settle window".
+   The structure is .toast > div > b(title) + span(message), so the title is a
+   direct-child match and nothing else is. */
+.toast>div>b{display:block;margin-bottom:2px}
+.toast span b{display:inline;color:var(--ink);font-weight:650}
 .toast span{color:var(--ink-2);font-size:12px;line-height:1.5;display:block}
 .toast code{font-family:var(--mono);font-size:11px;background:#0006;padding:1px 4px;border-radius:3px}
 @keyframes tin{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
@@ -430,14 +436,56 @@ body.simple .stage-top{justify-content:flex-end;padding:5px 12px}
 body.simple #btnRail,body.simple #btnInsp{display:none}
 /* live mode still earns its transport, so it is shown when it is in use */
 body.simple .transport[hidden]{display:none}
+
+/* Nothing loaded yet: the empty state is the whole stage. Without this the
+   canvas stack shows at its default 300x150 in the corner, checkerboard and
+   all. */
+body:not(.has-source) #pan{display:none}
+
+/* ══════════════════ portrait phones ══════════════════
+   The viewer is a 16:9 frame. On a portrait phone that is a letterbox about a
+   third of the screen tall, with the controls squeezed under it — technically
+   working and useless in practice. Ask for a turn rather than rendering
+   something nobody can judge a matte on. Pure CSS: it cannot fall out of step
+   with the real orientation the way a JS listener can. */
+.rotate{display:none}
+@media (max-width:900px) and (orientation:portrait){
+  body:not(.rotate-ok) .rotate{
+    display:flex;position:fixed;inset:0;z-index:99;flex-direction:column;
+    align-items:center;justify-content:center;gap:18px;padding:32px;text-align:center;
+    background:var(--bg)}
+  body:not(.rotate-ok) .rotate svg{animation:tip 2.4s ease-in-out infinite}
+  .rotate h2{margin:0;font-size:19px;color:var(--ink)}
+  .rotate p{margin:0;max-width:24rem;font-size:13px;line-height:1.6;color:var(--ink-2)}
+}
+@keyframes tip{0%,55%,100%{transform:rotate(0)}70%,85%{transform:rotate(-90deg)}}
+@media (prefers-reduced-motion:reduce){.rotate svg{animation:none}}
+
+/* Landscape on a phone: give the frame every pixel there is. */
+@media (max-height:520px) and (orientation:landscape){
+  header.bar{padding:4px 10px}
+  .brand-txt,.stage-top{display:none}
+  body.simple .simple-bar{padding:6px 10px;gap:9px}
+}
 </style>
 </head>
 <body>
 <div id="app">
 
+<!-- Portrait phone: ask for a turn. CSS decides when this shows. -->
+<div class="rotate" id="rotate">
+  <svg width="54" height="54" viewBox="0 0 24 24" fill="none" stroke="#ffb020" stroke-width="1.6"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>
+  </svg>
+  <h2>Turn your phone sideways</h2>
+  <p>AlphaGrab shows a 16:9 broadcast frame. Landscape gives it the whole screen — upright it is a letterbox too small to judge an edge or a matte on.</p>
+  <button class="btn" id="rotateOk">Carry on upright</button>
+</div>
+
 <!-- ══════════════════════════ top bar ══════════════════════════ -->
 <header class="bar">
-  <div class="brand" title="AlphaGrab v0.3.3">
+  <div class="brand" title="AlphaGrab v0.3.4">
     <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
       <defs><clipPath id="lm"><rect x="2" y="2" width="28" height="28" rx="7"/></clipPath></defs>
       <g clip-path="url(#lm)">
@@ -796,8 +844,8 @@ body.simple .transport[hidden]{display:none}
     <summary><span class="dot"></span>About<span class="chev">▶</span></summary>
     <div class="pbody">
       <dl class="kv">
-        <dt>Version</dt><dd>0.3.3</dd>
-        <dt>Build</dt><dd>2026-09-14·bed10d4a</dd>
+        <dt>Version</dt><dd>0.3.4</dd>
+        <dt>Build</dt><dd>2026-09-14·ad8b3b95</dd>
         <dt>Canvas limit</dt><dd id="ceilVal">—</dd>
         <dt>Network</dt><dd>fetch only</dd>
       </dl>
@@ -896,8 +944,8 @@ http.createServer(async (req, res) => {
 'use strict';
 
 const AG = window.AG = {
-  VERSION: '0.3.3',
-  BUILD:   '2026-09-14·bed10d4a',
+  VERSION: '0.3.4',
+  BUILD:   '2026-09-14·ad8b3b95',
 
   /* Advertised limits. tests/guard.mjs pins the marketing copy to these. */
   MAX_DIM: 8192,          // largest side offered by the UI (probe may allow more)
@@ -2579,6 +2627,10 @@ function boot(){
   bindDropAndPaste();
   bindLive();
   bindSimple();
+  /* The only JS the rotate prompt needs: a way out for anyone who genuinely
+     wants it upright. Whether it SHOWS is CSS's decision, so it can never
+     disagree with the actual orientation. */
+  on($('#rotateOk'), 'click', () => document.body.classList.add('rotate-ok'));
   renderRecent();
   renderUserPresets();
   setUiMode(S.opts.ui || 'simple');
@@ -2765,6 +2817,11 @@ const gcd = (a, b) => b ? gcd(b, a % b) : (a || 1);
 
 function syncControls(){
   const o = S.opts;
+  /* An unsized <canvas> is 300x150 by default, and #cvBg paints a checkerboard
+     into it — so before anything is loaded the stack sat in the top-left corner
+     as a small checkered rectangle poking out from under the empty state. It
+     looked like a rendering artefact because that is exactly what it was. */
+  document.body.classList.toggle('has-source', !!S.source);
   segSyncs.forEach(f => f());
   if ($('#mv')) syncLiveView();
   if ($('#simpleBar')) syncSimple();
