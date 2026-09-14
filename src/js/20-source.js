@@ -643,6 +643,29 @@ function domToSvg(doc, W, H, fontCss, note){
       return { c: stopColor(cm[1]), o: cm[2] || round(i / Math.max(1, parts.length - 1) * 100, 2) + '%' };
     }).filter(Boolean);
     if (stops.length < 2) return null;
+
+    /* The `transparent` keyword is rgba(0, 0, 0, 0) — transparent BLACK. CSS
+       hides that by interpolating gradients with premultiplied alpha, where a
+       zero-alpha stop contributes no colour at all. SVG interpolates colour and
+       opacity as two independent channels, so `white 82%, transparent 100%`
+       fades white to BLACK while fading out, and the halfway pixel is a solid
+       grey at half alpha.
+
+       On a lower third whose plate dissolves off the right of frame, that
+       exported as a dirty grey smear sitting where the monitor showed nothing —
+       the single most visible difference left between the two. Give every
+       fully transparent stop the colour of its nearest visible neighbour, which
+       is what premultiplied interpolation arrives at anyway. */
+    for (let i = 0; i < stops.length; i++) {
+      if (stops[i].c.opacity > 0.002) continue;
+      let src = null;
+      for (let d = 1; d < stops.length && !src; d++) {
+        const before = stops[i - d], after = stops[i + d];
+        if (before && before.c.opacity > 0.002) src = before;
+        else if (after && after.c.opacity > 0.002) src = after;
+      }
+      if (src) stops[i].c = { fill: src.c.fill, opacity: stops[i].c.opacity };
+    }
     const rad = (angle - 90) * Math.PI / 180;
     const id = 'agg' + (gid++);
     defs.push(`<linearGradient id="${id}" x1="${round(50 - Math.cos(rad) * 50,2)}%" y1="${round(50 - Math.sin(rad) * 50,2)}%" x2="${round(50 + Math.cos(rad) * 50,2)}%" y2="${round(50 + Math.sin(rad) * 50,2)}%">` +

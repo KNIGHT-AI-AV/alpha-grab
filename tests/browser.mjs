@@ -385,6 +385,29 @@ is(shadowPx.text > 200, `a text-shadow lands below the glyphs: ${shadowPx.text} 
 is(shadowPx.drop > 200, `a CSS filter drop-shadow lands below its box: ${shadowPx.drop} px`);
 is(shadowPx.filters === 3, `one <filter> per shadowed element, not per line: ${shadowPx.filters}`);
 
+group('a fade to transparent stays clean');
+/* `transparent` is rgba(0,0,0,0). Interpolating colour and alpha separately
+   turns "white to transparent" into "white to black, fading out" — a grey
+   smear where the monitor shows nothing. Sampled at the three-quarter point of
+   the fade, where that smear was densest. */
+const fade = await page.evaluate(async () => {
+  const html = '<body style="margin:0;width:400px;height:100px">' +
+    '<div style="position:absolute;inset:0;background:linear-gradient(90deg,#fff 0%,transparent 100%)"></div></body>';
+  const src = await loadFromUrl('data:text/html,' + encodeURIComponent(html));
+  src.w = 400; src.h = 100;
+  const svg = await captureDom(src, 60, () => {});
+  const img = new Image();
+  await new Promise((res, rej) => { img.onload = res; img.onerror = rej;
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); });
+  const c = document.createElement('canvas'); c.width = 400; c.height = 100;
+  c.getContext('2d').drawImage(img, 0, 0);
+  const d = c.getContext('2d').getImageData(300, 50, 1, 1).data;
+  return { r: d[0], g: d[1], b: d[2], a: d[3] };
+});
+is(fade.r > 200 && fade.g > 200 && fade.b > 200,
+   `three quarters along a white-to-transparent fade the ink is still white, not grey: rgb(${fade.r},${fade.g},${fade.b})`);
+is(fade.a > 20 && fade.a < 160, `and it really is mid-fade, not solid or gone: alpha ${fade.a}`);
+
 group('a plate behind the text does not paint over it');
 /* The bug this guards: a template orders plate and caption by z-index, with the
    plate written LATER in the DOM. Emitting in document order painted the plate
