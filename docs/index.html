@@ -704,7 +704,7 @@ body.simple #toasts{bottom:calc(var(--simple-bar-h, 58px) + 14px)}
 
 <!-- ══════════════════════════ top bar ══════════════════════════ -->
 <header class="bar">
-  <div class="brand" title="AlphaGrab v0.6.0">
+  <div class="brand" title="AlphaGrab v0.6.1">
     <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
       <defs><clipPath id="lm"><rect x="2" y="2" width="28" height="28" rx="7"/></clipPath></defs>
       <g clip-path="url(#lm)">
@@ -1068,8 +1068,8 @@ body.simple #toasts{bottom:calc(var(--simple-bar-h, 58px) + 14px)}
     <summary><span class="dot"></span>About<span class="chev">▶</span></summary>
     <div class="pbody">
       <dl class="kv">
-        <dt>Version</dt><dd>0.6.0</dd>
-        <dt>Build</dt><dd>2026-09-14·335e2a47</dd>
+        <dt>Version</dt><dd>0.6.1</dd>
+        <dt>Build</dt><dd>2026-09-14·48bc27e8</dd>
         <dt>Canvas limit</dt><dd id="ceilVal">—</dd>
         <dt>Network</dt><dd>fetch only</dd>
       </dl>
@@ -1170,8 +1170,8 @@ http.createServer(async (req, res) => {
 'use strict';
 
 const AG = window.AG = {
-  VERSION: '0.6.0',
-  BUILD:   '2026-09-14·335e2a47',
+  VERSION: '0.6.1',
+  BUILD:   '2026-09-14·48bc27e8',
 
   /* Advertised limits. tests/guard.mjs pins the marketing copy to these. */
   MAX_DIM: 8192,          // largest side offered by the UI (probe may allow more)
@@ -1998,9 +1998,52 @@ async function embedFontUrls(css, base, note, ctx){
   return css.replace(/src\s*:\s*,/i, 'src:');
 }
 
+/* Which typefaces does this graphic ACTUALLY put on screen?
+
+   Measured on a live Flowics lower third: it renders exactly ONE webfont,
+   HelveticaNeueLTStd. We were embedding fourteen faces across thirty files and
+   892 KB — including three complete icon-font families the graphic never shows
+   a glyph of. That cost 29 relay round trips on every single download, and then
+   the rasteriser had to parse all 892 KB of base64 again to draw one frame.
+   Together they were 11 of the 22 seconds between pressing Download and getting
+   a file.
+
+   Only families reached by text that is actually painted count. Hidden icon
+   spans have no layout box, so they fall out on their own. */
+function usedFamilies(doc){
+  const out = new Set();
+  const win = doc.defaultView;
+  if (!doc.body || !win) return out;
+  const walk = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+    if (!(n.nodeValue || '').trim()) continue;
+    const el = n.parentElement;
+    if (!el) continue;
+    let cs;
+    try { cs = win.getComputedStyle(el); } catch (_) { continue; }
+    if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) <= 0.02) continue;
+    let r;
+    try { const rg = doc.createRange(); rg.selectNodeContents(n); r = rg.getBoundingClientRect(); } catch (_) { continue; }
+    if (r.width < 2 || r.height < 2) continue;
+    for (const f of String(cs.fontFamily || '').split(','))
+      out.add(f.trim().replace(/^["']|["']$/g, '').toLowerCase());
+  }
+  return out;
+}
+
+/* Font files do not change between two downloads of the same graphic, and the
+   operator's loop is downloads of the same graphic. Keyed on the base URL and
+   the exact set of families wanted, so a graphic that swaps to a different
+   typeface still re-reads rather than serving the old one. */
+const FONT_CACHE = new Map();
+
 async function collectFontFaces(doc, baseUrl, note){
+  const want = usedFamilies(doc);
+  const key = (baseUrl || '') + '|' + [...want].sort().join(',');
+  if (FONT_CACHE.has(key)) return FONT_CACHE.get(key);
+
   let out = '';
-  const ctx = { ok: new Set(), failed: [] };
+  const ctx = { ok: new Set(), failed: [], want };
   for (const sheet of Array.from(doc.styleSheets || [])) {
     let rules = null;
     try { rules = sheet.cssRules; }
@@ -2018,6 +2061,7 @@ async function collectFontFaces(doc, baseUrl, note){
           const r = await fetchAsset(href, { mode:'cors', credentials:'omit', cache:'no-store' });
           if (r && r.ok) {
             for (const block of fontFaceBlocks(await r.text())) {
+              if (!wanted(ctx, block)) { recovered++; continue; }
               const css = await embedFontUrls(block, href, note, ctx);
               if (css) { out += css + '\n'; recovered++; ctx.ok.add(fontFamilyOf(css)); }
             }
@@ -2029,6 +2073,7 @@ async function collectFontFaces(doc, baseUrl, note){
     }
     for (const rule of Array.from(rules || [])) {
       if (rule.constructor.name !== 'CSSFontFaceRule') continue;
+      if (!wanted(ctx, rule.cssText)) continue;
       const embedded = await embedFontUrls(rule.cssText, sheet.href || baseUrl, note, ctx);
       if (embedded) { out += embedded + '\n'; ctx.ok.add(fontFamilyOf(embedded)); }
     }
@@ -2037,7 +2082,20 @@ async function collectFontFaces(doc, baseUrl, note){
      rule's dead sources did. Only say something when the typeface really will
      not be in the frame. */
   for (const f of ctx.failed) if (!ctx.ok.has(f.family)) note(f.why);
+  FONT_CACHE.set(key, out);
+  /* Unbounded growth is not a risk worth a whole eviction policy here — one
+     entry per graphic per session — but a runaway page should not be able to
+     fill memory either. */
+  if (FONT_CACHE.size > 24) FONT_CACHE.delete(FONT_CACHE.keys().next().value);
   return out;
+}
+
+/* A face is wanted when something on screen asks for its family. An empty want
+   set means we could not read the document, in which case embed everything
+   rather than silently stripping the typography. */
+function wanted(ctx, cssText){
+  if (!ctx || !ctx.want || !ctx.want.size) return true;
+  return ctx.want.has(fontFamilyOf(cssText));
 }
 
 /* ── the repaint ────────────────────────────────────────────────────────── */
