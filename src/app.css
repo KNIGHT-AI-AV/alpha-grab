@@ -545,3 +545,23 @@ body.simple #toasts{bottom:calc(var(--simple-bar-h, 58px) + 14px)}
 #toasts>*{pointer-events:auto}
 .toast ul{margin:5px 0 0;padding-left:17px;display:flex;flex-direction:column;gap:3px}
 .toast li{line-height:1.45}
+
+/* ══════════════════ the top bar reads from the centre ══════════════════
+   The URL field was the flex grower, so it stretched to whatever was left and
+   the bar read as three things shoved against three edges. Giving the brand and
+   the actions an equal flex basis makes them balance, which puts the field —
+   the one thing every session starts with — on the true centre line of the page,
+   over the centre of the stage below it.
+
+   Only above 1024px. In the 900-1000 band the action buttons start collapsing
+   their labels, so the two sides stop being balanceable and the field lands
+   further off centre than it did before — measured at 960px: 300px out. Below
+   the threshold the original layout stands, where the field simply fills. */
+@media (min-width:1024px){
+  header.bar .brand{flex:1 1 0;min-width:0}
+  header.bar .bar-actions{flex:1 1 0;justify-content:flex-end}
+  /* The field must leave enough room for BOTH sides to reach their natural
+     width, or the wider side (the action buttons) pushes it off centre. 620px
+     is the two of them plus the gaps; below that the field yields instead. */
+  header.bar .urlwrap{flex:0 1 min(760px,calc(100vw - 620px))}
+}
