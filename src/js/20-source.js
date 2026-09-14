@@ -40,7 +40,17 @@ function proxied(url){
 
      A ticked box now always routes somewhere. With nothing typed it uses the
      relay we run, which is what the field is pre-filled with anyway. */
-  const p = ((S.opts.proxy || '').trim()) || AG.RELAY;
+  return throughRelay(((S.opts.proxy || '').trim()) || AG.RELAY, url);
+}
+
+/* Two shapes of proxy address in the wild: a template carrying `{url}`, and a
+   bare prefix the target is appended to. Our own relay is the FIRST shape
+   (`…/p/{url}`), so appending to it produced `…/p/{url}/https://…` — a literal
+   `{url}` path segment, which the relay answered 400 to. That is how the repair
+   path came to fail silently on every font while the relay itself was serving
+   those exact URLs at 200. One helper now, used by both callers. */
+function throughRelay(p, url){
+  if (!p) return null;
   return p.includes('{url}')
     ? p.replace('{url}', encodeURIComponent(url))
     : p.replace(/\/?$/, '/') + url;
@@ -289,7 +299,7 @@ async function fetchAsset(url, opts){
      apply at all. */
   if (!via && AG.RELAY) {
     try {
-      const r = await fetch(AG.RELAY.replace(/\/?$/, '/') + url, opts);
+      const r = await fetch(throughRelay(AG.RELAY, url), opts);
       if (r.ok) return r;
     } catch (_) {}
   }
