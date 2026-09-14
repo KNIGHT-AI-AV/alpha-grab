@@ -183,8 +183,18 @@ function bindControls(){
 
   on($('#quality'), 'input', e => { S.opts.quality = parseInt(e.target.value, 10) / 100; syncLabels(); saveOpts(); });
   on($('#filename'), 'change', e => { S.opts.filename = e.target.value.trim() || '{name}_{w}x{h}'; saveOpts(); });
-  on($('#useProxy'), 'change', e => { S.opts.useProxy = e.target.checked; saveOpts(); });
   on($('#proxy'), 'change', e => { S.opts.proxy = e.target.value.trim(); saveOpts(); });
+  /* Ticking the box is the whole action. It fills the field with the relay so
+     the route is visible rather than implied, and re-grabs immediately — the
+     old handler only recorded the flag, leaving someone who had just been told
+     to "switch on a CORS proxy" staring at an unchanged error. */
+  on($('#useProxy'), 'change', e => {
+    S.opts.useProxy = e.target.checked;
+    if (e.target.checked && !(S.opts.proxy || '').trim()) S.opts.proxy = AG.RELAY;
+    saveOpts(); syncControls();
+    const u = ($('#url').value || '').trim() || (S.source && S.source.url);
+    if (e.target.checked && u) grabUrl(u).catch(showError);
+  });
 
   on($('#resetKey'), 'click', () => {
     Object.assign(S.opts, { keyMode:'none', tolerance:22, softness:14, spill:60, lumaLo:6, lumaHi:30,

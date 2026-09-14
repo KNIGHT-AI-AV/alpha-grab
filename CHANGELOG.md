@@ -1,5 +1,33 @@
 # AlphaGrab changelog
 
+## 0.3.2 - 2026-09-14
+
+**The relay checkbox was a lie.** Reported from a live show: "the output link
+puller wouldnt take the flowics output, even with the proxy link box checked."
+
+It was true. `proxied()` returned `null` whenever the box was ticked and the
+field was empty - and the field is empty for everyone who has not pasted a proxy
+of their own. The request went out unproxied and came back with the byte-identical
+CORS error, while the control sat there switched on. The tool's own error text
+had sent him to that box.
+
+- **A ticked box now always routes somewhere.** Left blank it uses the relay we
+  run; a pasted proxy still wins.
+- **Ticking it fills the field with the route** instead of leaving it blank, so
+  where the request goes is visible rather than implied, **and re-grabs the URL
+  immediately** - the old handler only recorded the flag, so nothing happened
+  until you pressed Grab again.
+- Relabelled "Fetch through a CORS proxy" -> **"Fetch through a relay"**, and the
+  hint now names the default instead of assuming you run your own.
+
+Four checks pin exactly that path: unticked is still null, ticked-and-empty
+routes through the relay, a pasted proxy wins, and ticking shows the route.
+46 guard + 102 Chromium.
+
+**Note for anyone who hit this:** `www.knightaiav.com/alpha-grab/` was still
+serving **0.2.0**, which predates the relay entirely - no button, no simple mode.
+The current tool has only ever been at **alphagrab.knightaiav.com**.
+
 ## 0.3.1 - 2026-09-11
 
 Phones and narrow windows. Reported from one: "what is this random texture up

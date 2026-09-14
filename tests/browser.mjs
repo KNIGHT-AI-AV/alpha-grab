@@ -643,6 +643,49 @@ const corsAction = await page.evaluate(() => {
 is(corsAction.action === 'relay' && corsAction.relay,
    'a CORS refusal carries a one-click relay action rather than a paragraph of advice');
 
+/* ══════════════ the relay switch is not a lie ══════════════
+   Reported from a live show, 2026-09-14: "the output link puller wouldnt take
+   the flowics output, even with the proxy link box checked."
+
+   It was true. `proxied()` returned null when the box was ticked and the field
+   was empty, so the request went out unproxied and came back with the SAME CORS
+   error — while the box sat there switched on. The tool's own error text had
+   sent him to that box. A control that reports itself as on and does nothing is
+   the worst failure this codebase can ship. */
+group('a ticked relay box always routes somewhere');
+const relaySwitch = await page.evaluate(() => {
+  const u = 'https://example.com/lower-third.png';
+  const out = {};
+  AG.state.opts.useProxy = false; AG.state.opts.proxy = '';
+  out.offIsNull = proxied(u) === null;
+
+  AG.state.opts.useProxy = true;  AG.state.opts.proxy = '';        // Charlie's exact state
+  out.tickedEmpty = proxied(u);
+
+  AG.state.opts.proxy = 'https://my-own.example/{url}';
+  out.tickedCustom = proxied(u);
+
+  AG.state.opts.useProxy = false; AG.state.opts.proxy = '';
+  return out;
+});
+is(relaySwitch.offIsNull, 'unticked still means no relay at all');
+is(typeof relaySwitch.tickedEmpty === 'string' && relaySwitch.tickedEmpty.includes('relay-production'),
+   `ticked with an empty field routes through the relay, not nowhere: ${String(relaySwitch.tickedEmpty).slice(0, 62)}…`);
+is(String(relaySwitch.tickedCustom).startsWith('https://my-own.example/'),
+   'a pasted proxy still wins over the default');
+
+const relayUi = await page.evaluate(async () => {
+  AG.state.opts.useProxy = false; AG.state.opts.proxy = ''; syncControls();
+  const box = document.getElementById('useProxy');
+  box.checked = true; box.dispatchEvent(new Event('change', { bubbles: true }));
+  await new Promise(r => setTimeout(r, 60));
+  const field = document.getElementById('proxy').value;
+  AG.state.opts.useProxy = false; AG.state.opts.proxy = ''; syncControls();
+  return { field, on: true };
+});
+is(relayUi.field.includes('relay-production'),
+   'and ticking it shows the route in the field instead of leaving it blank');
+
 group('no errors accumulated across the whole run');
 is(errors.length === 0, 'still no console or page errors', errors.slice(0, 3).join(' | '));
 

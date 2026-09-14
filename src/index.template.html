@@ -87,9 +87,9 @@
       </div>
 
       <div class="field">
-        <label class="check"><input type="checkbox" id="useProxy"> Fetch through a CORS proxy</label>
-        <input type="text" id="proxy" spellcheck="false" placeholder="https://my-proxy.example/{url}">
-        <p class="hint">Only needed when a server refuses to share its pixels with a browser. <code>{url}</code> is replaced with the encoded address. Run your own — anything you route through a proxy is visible to whoever runs it.</p>
+        <label class="check"><input type="checkbox" id="useProxy"> Fetch through a relay</label>
+        <input type="text" id="proxy" spellcheck="false" placeholder="uses the Knight relay — or paste your own https://proxy.example/{url}">
+        <p class="hint">Turn this on when a server refuses to share its pixels with a browser. Left blank it uses <b>the relay we run</b>, which is enough for Flowics, Singular and most graphics hosts. Paste your own to route it elsewhere — <code>{url}</code> is replaced with the encoded address. Anything routed through a relay is visible to whoever runs it.</p>
       </div>
 
       <div class="field" id="recentWrap" hidden>

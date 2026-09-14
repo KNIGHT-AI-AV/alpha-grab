@@ -1,6 +1,6 @@
 {
   "name": "alphagrab",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "description": "AlphaGrab - run live HTML graphics locally, watch them switcher-style, and pull any frame with a real alpha channel. Browser-only, for broadcast and AV.",
   "type": "module",

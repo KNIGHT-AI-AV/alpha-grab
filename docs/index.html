@@ -437,7 +437,7 @@ body.simple .transport[hidden]{display:none}
 
 <!-- ══════════════════════════ top bar ══════════════════════════ -->
 <header class="bar">
-  <div class="brand" title="AlphaGrab v0.3.1">
+  <div class="brand" title="AlphaGrab v0.3.2">
     <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
       <defs><clipPath id="lm"><rect x="2" y="2" width="28" height="28" rx="7"/></clipPath></defs>
       <g clip-path="url(#lm)">
@@ -502,9 +502,9 @@ body.simple .transport[hidden]{display:none}
       </div>
 
       <div class="field">
-        <label class="check"><input type="checkbox" id="useProxy"> Fetch through a CORS proxy</label>
-        <input type="text" id="proxy" spellcheck="false" placeholder="https://my-proxy.example/{url}">
-        <p class="hint">Only needed when a server refuses to share its pixels with a browser. <code>{url}</code> is replaced with the encoded address. Run your own — anything you route through a proxy is visible to whoever runs it.</p>
+        <label class="check"><input type="checkbox" id="useProxy"> Fetch through a relay</label>
+        <input type="text" id="proxy" spellcheck="false" placeholder="uses the Knight relay — or paste your own https://proxy.example/{url}">
+        <p class="hint">Turn this on when a server refuses to share its pixels with a browser. Left blank it uses <b>the relay we run</b>, which is enough for Flowics, Singular and most graphics hosts. Paste your own to route it elsewhere — <code>{url}</code> is replaced with the encoded address. Anything routed through a relay is visible to whoever runs it.</p>
       </div>
 
       <div class="field" id="recentWrap" hidden>
@@ -796,8 +796,8 @@ body.simple .transport[hidden]{display:none}
     <summary><span class="dot"></span>About<span class="chev">▶</span></summary>
     <div class="pbody">
       <dl class="kv">
-        <dt>Version</dt><dd>0.3.1</dd>
-        <dt>Build</dt><dd>2026-09-11·36420301</dd>
+        <dt>Version</dt><dd>0.3.2</dd>
+        <dt>Build</dt><dd>2026-09-14·f458d3a0</dd>
         <dt>Canvas limit</dt><dd id="ceilVal">—</dd>
         <dt>Network</dt><dd>fetch only</dd>
       </dl>
@@ -896,8 +896,8 @@ http.createServer(async (req, res) => {
 'use strict';
 
 const AG = window.AG = {
-  VERSION: '0.3.1',
-  BUILD:   '2026-09-11·36420301',
+  VERSION: '0.3.2',
+  BUILD:   '2026-09-14·f458d3a0',
 
   /* Advertised limits. tests/guard.mjs pins the marketing copy to these. */
   MAX_DIM: 8192,          // largest side offered by the UI (probe may allow more)
@@ -1192,8 +1192,16 @@ class AGError extends Error {
 }
 
 function proxied(url){
-  const p = (S.opts.proxy || '').trim();
-  if (!S.opts.useProxy || !p) return null;
+  if (!S.opts.useProxy) return null;
+  /* An empty field with the box ticked used to mean "no proxy at all": the
+     control sat there switched on and did nothing, and the failure that came
+     back was the byte-identical CORS error you got without it. Someone
+     following the tool's own advice to "switch on a CORS proxy" therefore had
+     no way to tell the box from a lie.
+
+     A ticked box now always routes somewhere. With nothing typed it uses the
+     relay we run, which is what the field is pre-filled with anyway. */
+  const p = ((S.opts.proxy || '').trim()) || AG.RELAY;
   return p.includes('{url}')
     ? p.replace('{url}', encodeURIComponent(url))
     : p.replace(/\/?$/, '/') + url;
@@ -2678,8 +2686,18 @@ function bindControls(){
 
   on($('#quality'), 'input', e => { S.opts.quality = parseInt(e.target.value, 10) / 100; syncLabels(); saveOpts(); });
   on($('#filename'), 'change', e => { S.opts.filename = e.target.value.trim() || '{name}_{w}x{h}'; saveOpts(); });
-  on($('#useProxy'), 'change', e => { S.opts.useProxy = e.target.checked; saveOpts(); });
   on($('#proxy'), 'change', e => { S.opts.proxy = e.target.value.trim(); saveOpts(); });
+  /* Ticking the box is the whole action. It fills the field with the relay so
+     the route is visible rather than implied, and re-grabs immediately — the
+     old handler only recorded the flag, leaving someone who had just been told
+     to "switch on a CORS proxy" staring at an unchanged error. */
+  on($('#useProxy'), 'change', e => {
+    S.opts.useProxy = e.target.checked;
+    if (e.target.checked && !(S.opts.proxy || '').trim()) S.opts.proxy = AG.RELAY;
+    saveOpts(); syncControls();
+    const u = ($('#url').value || '').trim() || (S.source && S.source.url);
+    if (e.target.checked && u) grabUrl(u).catch(showError);
+  });
 
   on($('#resetKey'), 'click', () => {
     Object.assign(S.opts, { keyMode:'none', tolerance:22, softness:14, spill:60, lumaLo:6, lumaHi:30,

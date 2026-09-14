@@ -31,8 +31,16 @@ class AGError extends Error {
 }
 
 function proxied(url){
-  const p = (S.opts.proxy || '').trim();
-  if (!S.opts.useProxy || !p) return null;
+  if (!S.opts.useProxy) return null;
+  /* An empty field with the box ticked used to mean "no proxy at all": the
+     control sat there switched on and did nothing, and the failure that came
+     back was the byte-identical CORS error you got without it. Someone
+     following the tool's own advice to "switch on a CORS proxy" therefore had
+     no way to tell the box from a lie.
+
+     A ticked box now always routes somewhere. With nothing typed it uses the
+     relay we run, which is what the field is pre-filled with anyway. */
+  const p = ((S.opts.proxy || '').trim()) || AG.RELAY;
   return p.includes('{url}')
     ? p.replace('{url}', encodeURIComponent(url))
     : p.replace(/\/?$/, '/') + url;
