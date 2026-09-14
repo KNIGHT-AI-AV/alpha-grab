@@ -66,6 +66,13 @@ window.__decode = async (blob) => {
   return { w:bmp.width, h:bmp.height, clear, opaque, semi, type:blob.type, size:blob.size };
 };`});
 
+/* The opening (mark, then five panels) covers the page on a first visit, so it
+   would swallow every click below. Dismiss it the way Skip does. Its own
+   behaviour is checked in its own section. */
+await page.evaluate(() => { try { localStorage.setItem('alphagrab.intro.v1', '1'); } catch (_) {}
+  const i = document.querySelector('#intro'); if (i) i.hidden = true;
+  const s = document.querySelector('#splash'); if (s) s.remove(); });
+
 /* Simple mode is the default and hides the rail and inspector, so every check
    below that reaches for a panel control must say which UI it is testing.
    Forcing full mode here keeps those checks honest instead of passing because
@@ -395,8 +402,19 @@ const inst0 = await page.evaluate(async u => {
 is(inst0.n === 1, `the template opened as ${inst0.n} live instance`);
 is(inst0.ready && inst0.attached, 'its iframe is mounted and same-origin readable');
 
+await page.evaluate(() => setUiMode('full'));
 group('the monitor is live, not a still');
-const moving = await page.evaluate(async () => {
+const moving = await page.evaluate(async (u) => {
+  /* Load its OWN instance. Inheriting whatever the previous group left behind
+     couples this check to test order, and it then measures that instance's
+     state rather than the monitor's behaviour.
+     Watch it where it is actually VISIBLE, too: a `visibility:hidden` subtree
+     gets its animations throttled by Chromium. */
+  setUiMode('full'); MODE = 'live'; syncControls();
+  AG.state.opts.settle = 80; AG.state.opts.domW = 200; AG.state.opts.domH = 100;
+  const src = await loadFromUrl(u);
+  await setSource(src);
+  await new Promise(r => setTimeout(r, 150));
   const i = liveActive();
   /* Park at a known point inside the timeline first. Calling play() on an
      animation that has already run to its forwards fill leaves it holding the
@@ -409,7 +427,7 @@ const moving = await page.evaluate(async () => {
   const a = read();
   await new Promise(r => setTimeout(r, 300));
   return { a, b: read() };
-});
+}, animTpl);
 is(moving.a !== moving.b, `the graphic keeps painting on its own: ${moving.a} -> ${moving.b}`);
 
 group('the transport actually holds it');
@@ -469,10 +487,16 @@ const undisturbed = await page.evaluate(async () => {
 is(undisturbed.before === undisturbed.after, 'the template DOM is left exactly as it was');
 is(undisturbed.playing && undisturbed.alive, 'and it is still running afterwards');
 
+await page.evaluate(() => setUiMode('full'));
 group('instances are independent');
 const two = await page.evaluate(async u => {
-  const src = await loadFromUrl(u);
-  await setSource(src);
+  setUiMode('full'); MODE = 'live'; syncControls();
+  /* Start from a known set rather than whatever earlier groups accumulated. */
+  LIVE.list.slice().forEach(i => { if (i.tile) i.tile.remove(); disposeInstance(i); });
+  AG.state.opts.settle = 80;
+  await setSource(await loadFromUrl(u));
+  await setSource(await loadFromUrl(u + '#2'));
+  await new Promise(r => setTimeout(r, 150));
   const [a, b] = LIVE.list;
   instPause(a); instSeek(a, 100);
   instPlay(b);  instSeek(b, 0);
@@ -516,7 +540,9 @@ group('the multiviewer keeps its layout when it is not the visible view');
 /* [hidden]/display:none would strip every layout box from the instances, and
    the repaint would then export an empty frame. Measured: it did. */
 const laidOut = await page.evaluate(() => {
-  MODE = 'grab'; syncControls();
+  /* Full mode: simple mode promotes the instance to the stage instead, which is
+     a different mechanism with its own section. */
+  setUiMode('full'); MODE = 'grab'; syncControls();
   const mv = document.getElementById('mv');
   const tile = LIVE.list[0].frame.getBoundingClientRect();
   return { off: mv.classList.contains('off'), hidden: mv.hidden, w: Math.round(tile.width), h: Math.round(tile.height) };
@@ -568,8 +594,12 @@ for (const mode of ['simple', 'full']) {
     await page.evaluate(m => { setUiMode(m); AG.state.fit = true; layout(); draw(); }, mode);
     await page.waitForTimeout(250);
     const r = await page.evaluate(() => {
-      const g = n => { const e = document.querySelector(n); const b = e.getBoundingClientRect(); return { w: Math.round(b.width), h: Math.round(b.height), x: b.x, y: b.y }; };
-      const s = g('.stage'), v = g('#viewport'), c = g('#cvOut');
+      const g = n => { const e = document.querySelector(n); if (!e) return null; const b = e.getBoundingClientRect(); return { w: Math.round(b.width), h: Math.round(b.height), x: b.x, y: b.y }; };
+      /* Simple mode shows the LIVE instance; full mode shows the processed
+         canvas. Measure whichever is actually carrying the picture, or the
+         check just reports that the other one is hidden. */
+      const s = g('.stage'), v = g('#viewport');
+      const c = g('#mv.solo .inst:not(.parked) .inst-view') || g('#cvOut');
       return { stage: s.w, vpH: v.h, canvas: c.w, off: Math.round(Math.abs((c.x + c.w / 2) - (v.x + v.w / 2))),
                overflow: document.documentElement.scrollWidth - window.innerWidth };
     });
@@ -773,6 +803,65 @@ is(toastLines.innerDisplay === 'inline',
 group('a portrait phone is asked to turn');
 const rot = await page.evaluate(() => !!document.querySelector('#rotate'));
 is(rot, 'the rotate prompt exists in the page');
+group('the live feed is a feed, not a still');
+/* The instance iframe always animated; the stage showed the processed canvas,
+   which only repaints on a rerun — so a moving graphic looked frozen. Measured
+   on the real thing: the Flowics viz is plain DOM (no canvas, no video) painting
+   at ~60 fps, so the honest way to match it is to SHOW that running page rather
+   than re-rasterise it on a timer. */
+const feed = await page.evaluate(async () => {
+  const tpl = 'data:text/html,' + encodeURIComponent(
+    '<body style="margin:0;background:transparent"><style>@keyframes sl{from{transform:translateX(0)}to{transform:translateX(700px)}}' +
+    '#b{position:absolute;left:0;top:300px;width:240px;height:100px;background:#ffb020;animation:sl 1.6s linear infinite}</style><div id="b"></div></body>');
+  setUiMode('simple');
+  AG.state.opts.settle = 200; AG.state.opts.domW = 1920; AG.state.opts.domH = 1080;
+  const src = await loadFromUrl(tpl);
+  await setSource(src);
+  await new Promise(r => setTimeout(r, 400));
+  const inst = AG.state.source.inst;
+  const doc = inst.frame.contentDocument;
+  const at = () => Math.round(doc.getElementById('b').getBoundingClientRect().x);
+  const a = at(); await new Promise(r => setTimeout(r, 350)); const b = at();
+  return { solo: document.querySelector('#mv').classList.contains('solo'),
+           badge: !document.querySelector('#liveBadge').hidden,
+           canvasHidden: !document.querySelector('#pan').getClientRects().length,
+           moved: a !== b, a, b };
+});
+is(feed.solo && feed.canvasHidden, 'the running instance is the stage, not the processed canvas');
+is(feed.moved, `and it is actually moving on screen: x ${feed.a} -> ${feed.b}`);
+is(feed.badge, 'a LIVE badge says so rather than leaving it implied');
+
+const stillGrabs = await page.evaluate(async () => {
+  const d = await fullFrame();
+  let painted = 0; for (let i = 3; i < d.data.length; i += 4) if (d.data[i] > 0) painted++;
+  return { w: d.width, h: d.height, painted };
+});
+is(stillGrabs.w === 1920 && stillGrabs.painted > 1000,
+   `and a download still takes a real ${stillGrabs.w}x${stillGrabs.h} frame off it: ${stillGrabs.painted} px`);
+
+const label = await page.evaluate(() => ({
+  grab: document.querySelector('#grab').textContent.trim(),
+  reload: !!document.querySelector('#reload')
+}));
+is(/live/i.test(label.grab), `the button says what it does: "${label.grab}"`);
+is(label.reload, 'and a re-fetch control sits beside it');
+
+group('the opening plays once, then never again');
+const introRun = await page.evaluate(async () => {
+  try { localStorage.removeItem('alphagrab.intro.v1'); } catch (_) {}
+  introShow(1);
+  const first = document.querySelector('.intro-slide.on').dataset.slide;
+  introShow(5);
+  const lastBtn = document.querySelector('#introNext').textContent;
+  introDone();
+  const hidden = document.querySelector('#intro').hidden;
+  const seen = (() => { try { return localStorage.getItem('alphagrab.intro.v1') === '1'; } catch (_) { return false; } })();
+  return { first, lastBtn, hidden, seen, slides: document.querySelectorAll('.intro-slide').length };
+});
+is(introRun.slides === 5, `it is ${introRun.slides} panels, not more`);
+is(introRun.first === '1' && introRun.lastBtn === 'Start', 'it starts at one and ends with Start');
+is(introRun.hidden && introRun.seen, 'skipping closes it and it is remembered');
+
 group('no errors accumulated across the whole run');
 is(errors.length === 0, 'still no console or page errors', errors.slice(0, 3).join(' | '));
 

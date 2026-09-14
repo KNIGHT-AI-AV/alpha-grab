@@ -1,5 +1,54 @@
 # AlphaGrab changelog
 
+## 0.4.0 - 2026-09-14
+
+**It is a live feed now, not a still.**
+
+The instance iframe was always running and animating. The stage was showing the
+*processed canvas*, which only repaints on a rerun - so a moving graphic looked
+frozen, and it was reasonable to conclude the tool simply did not do live.
+
+Measured against the real thing first: a Flowics viz is **plain DOM** - zero
+canvases, zero video, 111 nodes driven by React - painting at **61 fps** on the
+browser compositor. There is no frame rate to replicate. So the honest fix is
+not to re-rasterise at 30 fps (a full DOM walk and SVG serialise per frame,
+which would melt a laptop); it is to let the running page BE the view. The
+browser is already compositing it, so it costs nothing and matches exactly.
+
+- **The stage is the live instance.** It animates at the browser's own rate. The
+  tile is promoted in place - the instance is never re-parented, because moving
+  a live iframe reloads it.
+- **A LIVE badge** says so instead of leaving it implied.
+- **"Grab" is now "Go live"**, which is what the button does, with a **re-fetch
+  icon** beside it.
+- Download still takes the exact frame that is on screen, at 1920x1080 with its
+  alpha.
+
+### The relay button no longer deletes itself
+
+An error toast expired after nine seconds - and the only route past a CORS
+refusal was the **Use the relay** button *inside* that toast. It removed itself
+while the message was still being read, leaving the diagnosis on screen and the
+fix gone. Reported as "still getting blocked by CORS" by someone looking
+straight at the answer. Toasts carrying an action now wait, with a close control.
+
+### Brand fonts survive a CORS-less host
+
+A cross-origin stylesheet cannot have its rules read, so its `@font-face` blocks
+were skipped and the export fell back to a system face - a wrong typeface on air.
+The stylesheet's *bytes* are still fetchable through the relay, so they are now
+fetched, parsed as text, and the faces embedded.
+
+### An opening, once
+
+The mark, large and centred, with "Created by Mayowa Alaketu - Knight AI+AV",
+then **five panels**: what it does, paste the link, get past a refusal, download,
+push the next graphic and download again. Skip is on every panel, Escape and the
+arrow keys work, and it never returns once dismissed. **Show the intro again**
+lives under **?**.
+
+46 guard + 123 Chromium, run twice.
+
 ## 0.3.4 - 2026-09-14
 
 Three things reported off a real screen.

@@ -66,6 +66,7 @@ function boot(){
   bindDropAndPaste();
   bindLive();
   bindSimple();
+  bindIntro();
   /* The only JS the rotate prompt needs: a way out for anyone who genuinely
      wants it upright. Whether it SHOWS is CSS's decision, so it can never
      disagree with the actual orientation. */
@@ -230,6 +231,7 @@ function bindControls(){
   on($('#btnRail'), 'click', () => { document.body.classList.toggle('no-rail'); layout(); });
   on($('#btnInsp'), 'click', () => { document.body.classList.toggle('no-insp'); layout(); });
   on($('#btnHelp'), 'click', () => $('#help').showModal());
+  on($('#helpReplay'), 'click', () => { const d = $('#help'); if (d && d.close) d.close(); openIntro(); });
   on($('#helpClose'), 'click', () => $('#help').close());
   $$('[data-demo]').forEach(b => on(b, 'click', () => loadDemo(b.dataset.demo)));
 }
@@ -934,10 +936,36 @@ function setMode(v){ MODE = v; syncControls(); }
 
 /* Called from syncControls so the two views never disagree about what is shown. */
 function syncLiveView(){
+  /* SIMPLE MODE SHOWS THE FEED, NOT A STILL.
+     The instance iframe has always been running and animating; the stage was
+     showing the processed canvas, which only repaints on a rerun — so a moving
+     graphic appeared frozen. Promoting the tile in place makes the running
+     instance the view, at whatever rate the browser composites, for free.
+     The instance is never re-parented: moving a live iframe reloads it. */
+  const solo = S.opts.ui === 'simple' && MODE !== 'live'
+            && !!(S.source && S.source.inst && S.source.inst.ready);
+  const mv = $('#mv');
+  mv.classList.toggle('solo', solo);
+  const badge = $('#liveBadge');
+  if (badge) badge.hidden = !solo;
+  if (solo) {
+    mv.classList.remove('off');
+    renderMV();
+    /* The other instances are parked OFF-SCREEN, never display:none. They are
+       still running and still grabbable, and an element with no layout box has
+       no computed geometry — the repaint would export an empty frame from it.
+       Same trap that hid the multiviewer behind [hidden] in 0.2.0. */
+    LIVE.list.forEach(i => { if (i.tile) i.tile.classList.toggle('parked', i !== S.source.inst); });
+    requestAnimationFrame(() => LIVE.list.forEach(fitTile));
+  } else {
+    LIVE.list.forEach(i => { if (i.tile) i.tile.classList.remove('parked'); });
+  }
+  document.body.classList.toggle('feed', solo);
+
   const live = MODE === 'live';
   /* .off, not [hidden]: the running instances are inside #mv, and an element
      with no layout box has no computed geometry for the repaint to read. */
-  $('#mv').classList.toggle('off', !live);
+  if (!solo) $('#mv').classList.toggle('off', !live);
   $('#transport').hidden = !live;
   $('#mvNone').style.display = LIVE.list.length ? 'none' : '';
   const empty = $('#empty');
@@ -1087,6 +1115,10 @@ async function grabAll(){
    never switched on quietly. */
 function addRelayAction(t){
   if (!t) return;
+  /* Hold this one open. It is the only route past a CORS refusal, and a nine
+     second life on it is the difference between a tool that works and one that
+     "still gets blocked". */
+  if (t.stick) t.stick();
   const row = el('div', { style: { marginTop: '9px', display: 'flex', gap: '8px', alignItems: 'center' } });
   const go = el('button', { className: 'btn primary sm', textContent: 'Use the relay' });
   const why = el('span', { style: { fontSize: '11px', color: 'var(--ink-3)' }, textContent: 'routes this URL through our server' });
@@ -1111,6 +1143,10 @@ function bindSimple(){
   on($('#sbFile'),    'click', () => $('#fileInput').click());
   on($('#sbReset'),   'click', () => { S.opts.seq = 1; saveOpts(); syncSimple(); toast('Numbering reset', 'The next clip is 001.', 'ok'); });
   on($('#sbRefresh'), 'click', () => refreshSource(true).catch(showError));
+  on($('#reload'), 'click', () => {
+    const u = ($('#url').value || '').trim() || (S.source && S.source.url);
+    if (u) grabUrl(u).catch(showError); else toast('Nothing to re-fetch', 'Paste a link first.', 'warn');
+  });
   on($('#sbRefetch'), 'change', e => { S.opts.refetch = e.target.checked; saveOpts(); syncSimple(); });
   on($('#sbDownload'),'click', () => downloadClip().catch(showError));
 }
@@ -1225,6 +1261,55 @@ async function downloadClip(){
       toast('Saved', `<code>${fn}</code> · ${d.width} × ${d.height} · ${bytes(blob.size)}${a}`, 'ok');
     }
   } finally { done(); btn.disabled = !S.source; }
+}
+
+/* ═══════════════════ the opening ═══════════════════
+   Mark first, then five panels covering the only loop that matters: point it at
+   a link, get past a refusal, download, push the next graphic, download again.
+   Skip is on every panel and the whole thing is remembered once dismissed. */
+const INTRO_KEY = 'alphagrab.intro.v1';
+let introAt = 1;
+const INTRO_N = 5;
+
+function introSeen(){ try { return localStorage.getItem(INTRO_KEY) === '1'; } catch (_) { return false; } }
+function introDone(){
+  try { localStorage.setItem(INTRO_KEY, '1'); } catch (_) {}
+  const n = $('#intro'); if (n) n.hidden = true;
+  const u = $('#url'); if (u) u.focus();
+}
+
+function introShow(at){
+  introAt = clamp(at, 1, INTRO_N);
+  $$('.intro-slide').forEach(s => s.classList.toggle('on', +s.dataset.slide === introAt));
+  $$('#introDots i').forEach((d, i) => d.classList.toggle('on', i + 1 === introAt));
+  $('#introBack').disabled = introAt === 1;
+  $('#introNext').textContent = introAt === INTRO_N ? 'Start' : 'Next';
+  $('#intro').hidden = false;
+}
+
+function openIntro(){ introShow(1); }
+
+function bindIntro(){
+  const dots = $('#introDots');
+  for (let i = 0; i < INTRO_N; i++) {
+    const d = el('i'); on(d, 'click', () => introShow(i + 1)); dots.append(d);
+  }
+  on($('#introSkip'), 'click', introDone);
+  on($('#introBack'), 'click', () => introShow(introAt - 1));
+  on($('#introNext'), 'click', () => introAt === INTRO_N ? introDone() : introShow(introAt + 1));
+  on(document, 'keydown', e => {
+    if ($('#intro').hidden) return;
+    if (e.key === 'Escape')     { e.preventDefault(); introDone(); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); introAt === INTRO_N ? introDone() : introShow(introAt + 1); }
+    if (e.key === 'ArrowLeft')  { e.preventDefault(); introShow(introAt - 1); }
+  });
+
+  /* The mark leads, then the panels. Someone who has seen it before gets
+     neither and lands straight in the tool. */
+  if (introSeen()) return;
+  const sp = $('#splash');
+  sp.hidden = false;
+  setTimeout(() => { sp.remove(); introShow(1); }, 2400);
 }
 
 /* go */

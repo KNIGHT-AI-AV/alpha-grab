@@ -450,3 +450,76 @@ body:not(.has-source) #pan{display:none}
   .brand-txt,.stage-top{display:none}
   body.simple .simple-bar{padding:6px 10px;gap:9px}
 }
+
+/* Dismiss control for a toast that waits for you. */
+.toast{position:relative}
+.toast-x{position:absolute;top:6px;right:7px;width:22px;height:22px;display:grid;place-items:center;
+  background:none;border:0;border-radius:5px;color:var(--ink-3);font-size:16px;line-height:1;cursor:pointer}
+.toast-x:hover{color:var(--ink);background:#ffffff12}
+
+/* ══════════════════ opening ══════════════════ */
+.splash{position:fixed;inset:0;z-index:120;display:grid;place-items:center;background:var(--bg);
+  animation:splashOut .55s ease 1.9s forwards}
+.splash-in{display:flex;flex-direction:column;align-items:center;gap:14px;
+  animation:splashIn .7s cubic-bezier(.16,.84,.28,1) both}
+.splash-mark{width:120px;height:120px}
+.splash-word{font-size:40px;font-weight:800;letter-spacing:-1px;color:var(--ink)}
+.splash-word i{font-style:normal;color:var(--gold)}
+.splash-by{font-size:12.5px;letter-spacing:.7px;color:var(--ink-3)}
+@keyframes splashIn{from{opacity:0;transform:translateY(12px) scale(.96)}to{opacity:1;transform:none}}
+@keyframes splashOut{to{opacity:0;visibility:hidden}}
+
+.intro{position:fixed;inset:0;z-index:110;display:grid;place-items:center;padding:22px;
+  background:#06080bd9;backdrop-filter:blur(6px);animation:splashIn .4s ease both}
+.intro-card{position:relative;width:min(560px,100%);background:var(--panel);border:1px solid var(--line);
+  border-radius:16px;box-shadow:var(--shadow);padding:26px 26px 18px}
+.intro-skip{position:absolute;top:14px;right:16px;background:none;border:0;color:var(--ink-3);
+  font-size:12.5px;cursor:pointer;padding:6px 8px;border-radius:6px}
+.intro-skip:hover{color:var(--ink);background:#ffffff10}
+.intro-slide{display:none}
+.intro-slide.on{display:block;animation:splashIn .3s ease both}
+.intro-art{background:#0b0f14;border:1px solid var(--line);border-radius:10px;margin-bottom:18px;padding:10px}
+.intro-art svg{display:block;width:100%;height:auto}
+.intro-slide h2{margin:0 0 8px;font-size:19px;font-weight:700;color:var(--ink);letter-spacing:-.2px}
+.intro-slide p{margin:0;font-size:13.5px;line-height:1.65;color:var(--ink-2)}
+.intro-slide p b{color:var(--ink);font-weight:650}
+.intro-foot{display:flex;align-items:center;gap:12px;margin-top:22px}
+.intro-dots{display:flex;gap:7px;flex:1 1 auto}
+.intro-dots i{width:7px;height:7px;border-radius:50%;background:#2c3542;transition:background .18s,width .18s}
+.intro-dots i.on{background:var(--gold);width:20px;border-radius:4px}
+.intro-btns{display:flex;gap:8px}
+@media (max-width:560px){ .intro-card{padding:20px 18px 14px} .intro-slide h2{font-size:17px} }
+
+/* ══════════════════ the live feed ══════════════════
+   The graphic was ALWAYS running — the instance iframe animates natively. What
+   the stage showed was the processed canvas, which only repaints on a rerun, so
+   a moving graphic looked frozen. The fix is not to re-rasterise at 30 fps (a
+   full DOM walk per frame, which would melt); it is to let the running instance
+   BE the view. The browser is already compositing it, so this costs nothing.
+
+   The tile is promoted in place. Re-parenting a live iframe reloads it in every
+   browser, so the instance never moves — the multiviewer simply goes solo. */
+body.simple #mv.solo{padding:14px;gap:0}
+body.simple #mv.solo .mv-grid{grid-template-columns:minmax(0,1fr);place-items:center;height:100%}
+body.simple #mv.solo .inst{border:0;background:none;width:100%;max-width:100%}
+body.simple #mv.solo .inst.sel{box-shadow:none}
+body.simple #mv.solo .inst-head{display:none}
+body.simple #mv.solo .inst-view{cursor:default;border-radius:var(--radius)}
+body.simple #mv.solo .inst-badge{display:none}
+
+.livebadge{position:absolute;left:14px;top:12px;z-index:6;display:flex;align-items:center;gap:7px;
+  font-family:var(--mono);font-size:11px;letter-spacing:1px;color:#fff;
+  background:#c0392bd9;padding:4px 9px;border-radius:4px;backdrop-filter:blur(3px);pointer-events:none}
+.livebadge i{width:7px;height:7px;border-radius:50%;background:#fff;animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.livebadge i{animation:none}}
+
+#reload{display:grid;place-items:center;width:38px;flex:0 0 auto;background:var(--panel-2);
+  border:1px solid var(--line);border-left:0;color:var(--ink-2);cursor:pointer}
+#reload:hover{color:var(--gold);background:var(--panel-3)}
+#reload:disabled{opacity:.4;cursor:default}
+/* While the feed is the view, the processed canvas stands down. */
+body.feed #pan{display:none}
+body.feed #empty{display:none!important}
+/* Parked, not removed: out of sight, still laid out, still capturable. */
+body.simple #mv.solo .inst.parked{position:absolute;left:-99999px;top:0;width:640px}

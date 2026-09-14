@@ -152,8 +152,24 @@ function toast(title, msg, kind, ms){
   if (msg) { const s = el('span'); s.innerHTML = msg; b.append(s); }
   t.append(b);
   box.append(t);
+  /* A toast that carries an ACTION must not expire. The CORS error's whole
+     value is the "Use the relay" button inside it — and on a 9-second timer that
+     button deleted itself while the message was still being read, leaving the
+     diagnosis on screen and the fix gone. Reported as "still getting blocked by
+     CORS" by someone who was looking at the answer.
+
+     stick() is called by whoever adds the action; it cancels the timer and adds
+     a close control, so the toast waits as long as the person does. */
   const life = ms || (kind === 'err' ? 9000 : 4200);
-  setTimeout(() => { t.style.transition = 'opacity .3s'; t.style.opacity = '0'; setTimeout(() => t.remove(), 320); }, life);
+  let timer = setTimeout(() => { t.style.transition = 'opacity .3s'; t.style.opacity = '0'; setTimeout(() => t.remove(), 320); }, life);
+  t.stick = () => {
+    clearTimeout(timer); timer = null;
+    if (t.querySelector('.toast-x')) return t;
+    const x = el('button', { className:'toast-x', textContent:'×', title:'Dismiss', ariaLabel:'Dismiss' });
+    on(x, 'click', () => t.remove());
+    t.append(x);
+    return t;
+  };
   return t;
 }
 

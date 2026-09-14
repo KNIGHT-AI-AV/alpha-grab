@@ -308,31 +308,69 @@ async function inlineImages(doc, baseUrl, note, undo){
 }
 
 /* ── @font-face rules whose files we can embed, so SVG text keeps the face ── */
+/* Pull the @font-face blocks out of raw CSS text. Used when the browser will not
+   let us read a stylesheet's rules — the text still parses fine, and @font-face
+   cannot nest, so matching to the first closing brace is sound. */
+function fontFaceBlocks(cssText){
+  const out = [];
+  const re = /@font-face\s*\{[^}]*\}/gi;
+  let m; while ((m = re.exec(cssText))) out.push(m[0]);
+  return out;
+}
+
+/* Turn every url() in one @font-face block into a data: URI. Returns null if any
+   of them cannot be fetched — a half-embedded face is worse than none, because
+   the browser falls back silently and you only see it in the exported frame. */
+async function embedFontUrls(css, base, note){
+  const urls = new Set();
+  css.replace(/url\(\s*["']?([^"')]+)["']?\s*\)/gi, (m, u) => { if (!/^data:/i.test(u)) urls.add(u); return m; });
+  for (const u of urls) {
+    let full = null, d = null;
+    try { full = new URL(u, base).href; } catch (_) {}
+    if (full) {
+      try {
+        const r = await fetch(proxied(full) || full, { mode:'cors', credentials:'omit', cache:'force-cache' });
+        if (r.ok) { const b = await r.arrayBuffer(); if (b.byteLength < 6e6) d = `data:font/woff2;base64,${b64(b)}`; }
+      } catch (_) {}
+    }
+    if (!d) { note('a webfont could not be embedded (CORS); that text falls back to a system face'); return null; }
+    css = css.split(u).join(d);
+  }
+  return css;
+}
+
 async function collectFontFaces(doc, baseUrl, note){
   let out = '';
   for (const sheet of Array.from(doc.styleSheets || [])) {
     let rules = null;
     try { rules = sheet.cssRules; }
-    catch (_) { note('a cross-origin stylesheet could not be inspected; its webfonts fall back to a system face'); continue; }
+    catch (_) {
+      /* Cross-origin: the browser hides the RULES, but the bytes are still
+         fetchable — and through the relay they are fetchable even from a host
+         that sends no CORS header at all. Giving up here meant a broadcast
+         graphic exported in a system fallback instead of its brand typeface,
+         which on air is a defect rather than a cosmetic difference. */
+      const href = sheet.href;
+      const via  = href ? (proxied(href) || href) : null;
+      let recovered = 0;
+      if (via) {
+        try {
+          const r = await fetch(via, { mode:'cors', credentials:'omit', cache:'no-store' });
+          if (r.ok) {
+            for (const block of fontFaceBlocks(await r.text())) {
+              const css = await embedFontUrls(block, href, note);
+              if (css) { out += css + '\n'; recovered++; }
+            }
+          }
+        } catch (_) {}
+      }
+      if (!recovered) note('a cross-origin stylesheet could not be inspected; its webfonts fall back to a system face');
+      continue;
+    }
     for (const rule of Array.from(rules || [])) {
       if (rule.constructor.name !== 'CSSFontFaceRule') continue;
-      let css = rule.cssText;
-      const urls = new Set();
-      css.replace(/url\(\s*["']?([^"')]+)["']?\s*\)/gi, (m, u) => { if (!/^data:/i.test(u)) urls.add(u); return m; });
-      let allOk = true;
-      for (const u of urls) {
-        let full = null, d = null;
-        try { full = new URL(u, sheet.href || baseUrl).href; } catch (_) {}
-        if (full) {
-          try {
-            const r = await fetch(proxied(full) || full, { mode:'cors', credentials:'omit', cache:'force-cache' });
-            if (r.ok) { const b = await r.arrayBuffer(); if (b.byteLength < 6e6) d = `data:font/woff2;base64,${b64(b)}`; }
-          } catch (_) {}
-        }
-        if (d) css = css.split(u).join(d); else allOk = false;
-      }
-      if (allOk) out += css + '\n';
-      else note('a webfont could not be embedded (CORS); that text falls back to a system face');
+      const embedded = await embedFontUrls(rule.cssText, sheet.href || baseUrl, note);
+      if (embedded) out += embedded + '\n';
     }
   }
   return out;

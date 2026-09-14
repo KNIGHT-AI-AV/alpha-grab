@@ -467,10 +467,187 @@ body:not(.has-source) #pan{display:none}
   .brand-txt,.stage-top{display:none}
   body.simple .simple-bar{padding:6px 10px;gap:9px}
 }
+
+/* Dismiss control for a toast that waits for you. */
+.toast{position:relative}
+.toast-x{position:absolute;top:6px;right:7px;width:22px;height:22px;display:grid;place-items:center;
+  background:none;border:0;border-radius:5px;color:var(--ink-3);font-size:16px;line-height:1;cursor:pointer}
+.toast-x:hover{color:var(--ink);background:#ffffff12}
+
+/* ══════════════════ opening ══════════════════ */
+.splash{position:fixed;inset:0;z-index:120;display:grid;place-items:center;background:var(--bg);
+  animation:splashOut .55s ease 1.9s forwards}
+.splash-in{display:flex;flex-direction:column;align-items:center;gap:14px;
+  animation:splashIn .7s cubic-bezier(.16,.84,.28,1) both}
+.splash-mark{width:120px;height:120px}
+.splash-word{font-size:40px;font-weight:800;letter-spacing:-1px;color:var(--ink)}
+.splash-word i{font-style:normal;color:var(--gold)}
+.splash-by{font-size:12.5px;letter-spacing:.7px;color:var(--ink-3)}
+@keyframes splashIn{from{opacity:0;transform:translateY(12px) scale(.96)}to{opacity:1;transform:none}}
+@keyframes splashOut{to{opacity:0;visibility:hidden}}
+
+.intro{position:fixed;inset:0;z-index:110;display:grid;place-items:center;padding:22px;
+  background:#06080bd9;backdrop-filter:blur(6px);animation:splashIn .4s ease both}
+.intro-card{position:relative;width:min(560px,100%);background:var(--panel);border:1px solid var(--line);
+  border-radius:16px;box-shadow:var(--shadow);padding:26px 26px 18px}
+.intro-skip{position:absolute;top:14px;right:16px;background:none;border:0;color:var(--ink-3);
+  font-size:12.5px;cursor:pointer;padding:6px 8px;border-radius:6px}
+.intro-skip:hover{color:var(--ink);background:#ffffff10}
+.intro-slide{display:none}
+.intro-slide.on{display:block;animation:splashIn .3s ease both}
+.intro-art{background:#0b0f14;border:1px solid var(--line);border-radius:10px;margin-bottom:18px;padding:10px}
+.intro-art svg{display:block;width:100%;height:auto}
+.intro-slide h2{margin:0 0 8px;font-size:19px;font-weight:700;color:var(--ink);letter-spacing:-.2px}
+.intro-slide p{margin:0;font-size:13.5px;line-height:1.65;color:var(--ink-2)}
+.intro-slide p b{color:var(--ink);font-weight:650}
+.intro-foot{display:flex;align-items:center;gap:12px;margin-top:22px}
+.intro-dots{display:flex;gap:7px;flex:1 1 auto}
+.intro-dots i{width:7px;height:7px;border-radius:50%;background:#2c3542;transition:background .18s,width .18s}
+.intro-dots i.on{background:var(--gold);width:20px;border-radius:4px}
+.intro-btns{display:flex;gap:8px}
+@media (max-width:560px){ .intro-card{padding:20px 18px 14px} .intro-slide h2{font-size:17px} }
+
+/* ══════════════════ the live feed ══════════════════
+   The graphic was ALWAYS running — the instance iframe animates natively. What
+   the stage showed was the processed canvas, which only repaints on a rerun, so
+   a moving graphic looked frozen. The fix is not to re-rasterise at 30 fps (a
+   full DOM walk per frame, which would melt); it is to let the running instance
+   BE the view. The browser is already compositing it, so this costs nothing.
+
+   The tile is promoted in place. Re-parenting a live iframe reloads it in every
+   browser, so the instance never moves — the multiviewer simply goes solo. */
+body.simple #mv.solo{padding:14px;gap:0}
+body.simple #mv.solo .mv-grid{grid-template-columns:minmax(0,1fr);place-items:center;height:100%}
+body.simple #mv.solo .inst{border:0;background:none;width:100%;max-width:100%}
+body.simple #mv.solo .inst.sel{box-shadow:none}
+body.simple #mv.solo .inst-head{display:none}
+body.simple #mv.solo .inst-view{cursor:default;border-radius:var(--radius)}
+body.simple #mv.solo .inst-badge{display:none}
+
+.livebadge{position:absolute;left:14px;top:12px;z-index:6;display:flex;align-items:center;gap:7px;
+  font-family:var(--mono);font-size:11px;letter-spacing:1px;color:#fff;
+  background:#c0392bd9;padding:4px 9px;border-radius:4px;backdrop-filter:blur(3px);pointer-events:none}
+.livebadge i{width:7px;height:7px;border-radius:50%;background:#fff;animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.livebadge i{animation:none}}
+
+#reload{display:grid;place-items:center;width:38px;flex:0 0 auto;background:var(--panel-2);
+  border:1px solid var(--line);border-left:0;color:var(--ink-2);cursor:pointer}
+#reload:hover{color:var(--gold);background:var(--panel-3)}
+#reload:disabled{opacity:.4;cursor:default}
+/* While the feed is the view, the processed canvas stands down. */
+body.feed #pan{display:none}
+body.feed #empty{display:none!important}
+/* Parked, not removed: out of sight, still laid out, still capturable. */
+body.simple #mv.solo .inst.parked{position:absolute;left:-99999px;top:0;width:640px}
 </style>
 </head>
 <body>
 <div id="app">
+
+<!-- ══════════ opening: the mark, then five slides, skippable throughout ══════════
+     The tool does one thing over and over and the whole job is in five panels.
+     Anyone who already knows it presses Skip once and never sees this again. -->
+<div class="splash" id="splash" hidden>
+  <div class="splash-in">
+    <svg class="splash-mark" viewBox="0 0 32 32" aria-hidden="true">
+      <defs><clipPath id="sm"><rect x="2" y="2" width="28" height="28" rx="7"/></clipPath></defs>
+      <g clip-path="url(#sm)">
+        <rect x="2" y="2" width="28" height="28" fill="#161c24"/>
+        <g fill="#232b36"><rect x="2" y="2" width="7" height="7"/><rect x="16" y="2" width="7" height="7"/><rect x="9" y="9" width="7" height="7"/><rect x="23" y="9" width="7" height="7"/><rect x="2" y="16" width="7" height="7"/><rect x="16" y="16" width="7" height="7"/><rect x="9" y="23" width="7" height="7"/><rect x="23" y="23" width="7" height="7"/></g>
+        <path d="M16 6.4 L24.6 25.6 H20.2 L18.6 21.6 H13.4 L11.8 25.6 H7.4 Z M16 12.9 L14.6 17.9 H17.4 Z" fill="#ffb020"/>
+      </g>
+      <rect x="2.6" y="2.6" width="26.8" height="26.8" rx="6.6" fill="none" stroke="#ffb02066"/>
+    </svg>
+    <div class="splash-word">Alpha<i>Grab</i></div>
+    <div class="splash-by">Created by Mayowa Alaketu · Knight AI+AV</div>
+  </div>
+</div>
+
+<div class="intro" id="intro" hidden role="dialog" aria-modal="true" aria-label="How AlphaGrab works">
+  <div class="intro-card">
+    <button class="intro-skip" id="introSkip">Skip</button>
+
+    <div class="intro-slide on" data-slide="1">
+      <div class="intro-art">
+        <svg viewBox="0 0 220 110" aria-hidden="true">
+          <defs><pattern id="ck" width="16" height="16" patternUnits="userSpaceOnUse">
+            <rect width="16" height="16" fill="#11161c"/><rect width="8" height="8" fill="#1b222b"/><rect x="8" y="8" width="8" height="8" fill="#1b222b"/>
+          </pattern></defs>
+          <rect x="6" y="6" width="208" height="98" rx="6" fill="url(#ck)" stroke="#2b3542"/>
+          <rect x="26" y="62" width="7" height="30" fill="#ffb020"/>
+          <rect x="33" y="62" width="112" height="30" fill="#0c1016" opacity=".94"/>
+          <text x="43" y="80" fill="#fff" font-size="12" font-weight="700" font-family="Helvetica,Arial">LOWER THIRD</text>
+        </svg>
+      </div>
+      <h2>Any URL in. A transparent frame out.</h2>
+      <p>Point AlphaGrab at a page that shows a graphic and it hands you a broadcast frame — <b>1920×1080, real alpha</b>, ready to drop on a timeline or a switcher. Everything happens in this browser.</p>
+    </div>
+
+    <div class="intro-slide" data-slide="2">
+      <div class="intro-art">
+        <svg viewBox="0 0 220 110" aria-hidden="true">
+          <rect x="10" y="38" width="150" height="30" rx="7" fill="#0e1319" stroke="#2b3542"/>
+          <text x="22" y="58" fill="#7d8b9c" font-size="11" font-family="monospace">https://…/live</text>
+          <rect x="166" y="38" width="44" height="30" rx="7" fill="#ffb020"/>
+          <text x="177" y="58" fill="#0b0e12" font-size="12" font-weight="700" font-family="Helvetica,Arial">Grab</text>
+        </svg>
+      </div>
+      <h2>Paste the link to your graphic</h2>
+      <p>The output URL from your graphics system — Flowics, Singular, a CasparCG template, or any page at all — into the bar at the top, then press <b>Grab</b>.</p>
+    </div>
+
+    <div class="intro-slide" data-slide="3">
+      <div class="intro-art">
+        <svg viewBox="0 0 220 110" aria-hidden="true">
+          <rect x="14" y="20" width="192" height="70" rx="8" fill="#141922" stroke="#e0464a"/>
+          <rect x="14" y="20" width="4" height="70" fill="#e0464a"/>
+          <text x="30" y="44" fill="#fff" font-size="12" font-weight="700" font-family="Helvetica,Arial">Blocked by CORS</text>
+          <rect x="30" y="56" width="92" height="22" rx="6" fill="#ffb020"/>
+          <text x="41" y="71" fill="#0b0e12" font-size="11" font-weight="700" font-family="Helvetica,Arial">Use the relay</text>
+        </svg>
+      </div>
+      <h2>If the host refuses, press one button</h2>
+      <p>Most graphics platforms will not let a browser read their pixels. That is their setting, not a fault here — so the error carries a <b>Use the relay</b> button that fetches it for you. Press it once and it is remembered.</p>
+    </div>
+
+    <div class="intro-slide" data-slide="4">
+      <div class="intro-art">
+        <svg viewBox="0 0 220 110" aria-hidden="true">
+          <rect x="12" y="40" width="120" height="28" rx="7" fill="#0e1319" stroke="#2b3542"/>
+          <text x="24" y="59" fill="#ffb020" font-size="12" font-family="monospace">clip_001.png</text>
+          <rect x="140" y="40" width="70" height="28" rx="7" fill="#ffb020"/>
+          <text x="152" y="59" fill="#0b0e12" font-size="12" font-weight="700" font-family="Helvetica,Arial">Download</text>
+        </svg>
+      </div>
+      <h2>Download it</h2>
+      <p>You get <b>clip_001.png</b> — the full frame at 1920×1080 with its transparency intact. The name of the next one is always shown before you press, so you know what you are about to get.</p>
+    </div>
+
+    <div class="intro-slide" data-slide="5">
+      <div class="intro-art">
+        <svg viewBox="0 0 220 110" aria-hidden="true">
+          <text x="14" y="40" fill="#7d8b9c" font-size="11" font-family="monospace">clip_001.png</text>
+          <text x="14" y="62" fill="#7d8b9c" font-size="11" font-family="monospace">clip_002.png</text>
+          <text x="14" y="84" fill="#ffb020" font-size="11" font-family="monospace">clip_003.png</text>
+          <path d="M120 40 h64 m0 0 l-7 -5 m7 5 l-7 5" stroke="#2f7d5b" stroke-width="2" fill="none"/>
+          <text x="120" y="64" fill="#9fb0c2" font-size="10" font-family="Helvetica,Arial">push the next</text>
+          <text x="120" y="78" fill="#9fb0c2" font-size="10" font-family="Helvetica,Arial">graphic, press again</text>
+        </svg>
+      </div>
+      <h2>Then just do it again</h2>
+      <p>Put the next graphic on air at the <b>same link</b> and press Download again. It re-fetches the page first and names the file <b>clip_002</b>, then <b>clip_003</b>. That loop is the whole tool — everything else is extra control you can ignore.</p>
+    </div>
+
+    <div class="intro-foot">
+      <div class="intro-dots" id="introDots"></div>
+      <div class="intro-btns">
+        <button class="btn" id="introBack">Back</button>
+        <button class="btn primary" id="introNext">Next</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Portrait phone: ask for a turn. CSS decides when this shows. -->
 <div class="rotate" id="rotate">
@@ -485,7 +662,7 @@ body:not(.has-source) #pan{display:none}
 
 <!-- ══════════════════════════ top bar ══════════════════════════ -->
 <header class="bar">
-  <div class="brand" title="AlphaGrab v0.3.4">
+  <div class="brand" title="AlphaGrab v0.4.0">
     <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
       <defs><clipPath id="lm"><rect x="2" y="2" width="28" height="28" rx="7"/></clipPath></defs>
       <g clip-path="url(#lm)">
@@ -504,7 +681,10 @@ body:not(.has-source) #pan{display:none}
     </span>
     <input id="url" type="text" spellcheck="false" autocomplete="off" autocapitalize="off"
            placeholder="https://…  image, SVG or HTML graphics template" aria-label="Source URL">
-    <button id="grab" title="Grab the frame  (Enter)">Grab</button>
+    <button id="grab" title="Open this link as a live feed  (Enter)">Go live</button>
+    <button id="reload" title="Re-fetch the page now  (R)" aria-label="Re-fetch">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+    </button>
   </div>
 
   <div class="bar-actions">
@@ -731,6 +911,7 @@ body:not(.has-source) #pan{display:none}
       </div>
     </div>
 
+    <div class="livebadge" id="liveBadge" hidden><i></i>LIVE</div>
     <div class="dropzone">Drop an image, SVG or HTML file</div>
     <div id="busy"><div class="spinner"></div><div id="busyMsg">Working…</div></div>
   </div>
@@ -844,8 +1025,8 @@ body:not(.has-source) #pan{display:none}
     <summary><span class="dot"></span>About<span class="chev">▶</span></summary>
     <div class="pbody">
       <dl class="kv">
-        <dt>Version</dt><dd>0.3.4</dd>
-        <dt>Build</dt><dd>2026-09-14·ad8b3b95</dd>
+        <dt>Version</dt><dd>0.4.0</dd>
+        <dt>Build</dt><dd>2026-09-14·f357d17b</dd>
         <dt>Canvas limit</dt><dd id="ceilVal">—</dd>
         <dt>Network</dt><dd>fetch only</dd>
       </dl>
@@ -861,6 +1042,7 @@ body:not(.has-source) #pan{display:none}
 <dialog id="help">
   <div class="dh">
     <h2>AlphaGrab — what it does and where it stops</h2>
+    <button class="btn" id="helpReplay">Show the intro again</button>
     <button class="btn" id="helpClose">Close</button>
   </div>
   <div class="db">
@@ -944,8 +1126,8 @@ http.createServer(async (req, res) => {
 'use strict';
 
 const AG = window.AG = {
-  VERSION: '0.3.4',
-  BUILD:   '2026-09-14·ad8b3b95',
+  VERSION: '0.4.0',
+  BUILD:   '2026-09-14·f357d17b',
 
   /* Advertised limits. tests/guard.mjs pins the marketing copy to these. */
   MAX_DIM: 8192,          // largest side offered by the UI (probe may allow more)
@@ -1091,8 +1273,24 @@ function toast(title, msg, kind, ms){
   if (msg) { const s = el('span'); s.innerHTML = msg; b.append(s); }
   t.append(b);
   box.append(t);
+  /* A toast that carries an ACTION must not expire. The CORS error's whole
+     value is the "Use the relay" button inside it — and on a 9-second timer that
+     button deleted itself while the message was still being read, leaving the
+     diagnosis on screen and the fix gone. Reported as "still getting blocked by
+     CORS" by someone who was looking at the answer.
+
+     stick() is called by whoever adds the action; it cancels the timer and adds
+     a close control, so the toast waits as long as the person does. */
   const life = ms || (kind === 'err' ? 9000 : 4200);
-  setTimeout(() => { t.style.transition = 'opacity .3s'; t.style.opacity = '0'; setTimeout(() => t.remove(), 320); }, life);
+  let timer = setTimeout(() => { t.style.transition = 'opacity .3s'; t.style.opacity = '0'; setTimeout(() => t.remove(), 320); }, life);
+  t.stick = () => {
+    clearTimeout(timer); timer = null;
+    if (t.querySelector('.toast-x')) return t;
+    const x = el('button', { className:'toast-x', textContent:'×', title:'Dismiss', ariaLabel:'Dismiss' });
+    on(x, 'click', () => t.remove());
+    t.append(x);
+    return t;
+  };
   return t;
 }
 
@@ -1517,31 +1715,69 @@ async function inlineImages(doc, baseUrl, note, undo){
 }
 
 /* ── @font-face rules whose files we can embed, so SVG text keeps the face ── */
+/* Pull the @font-face blocks out of raw CSS text. Used when the browser will not
+   let us read a stylesheet's rules — the text still parses fine, and @font-face
+   cannot nest, so matching to the first closing brace is sound. */
+function fontFaceBlocks(cssText){
+  const out = [];
+  const re = /@font-face\s*\{[^}]*\}/gi;
+  let m; while ((m = re.exec(cssText))) out.push(m[0]);
+  return out;
+}
+
+/* Turn every url() in one @font-face block into a data: URI. Returns null if any
+   of them cannot be fetched — a half-embedded face is worse than none, because
+   the browser falls back silently and you only see it in the exported frame. */
+async function embedFontUrls(css, base, note){
+  const urls = new Set();
+  css.replace(/url\(\s*["']?([^"')]+)["']?\s*\)/gi, (m, u) => { if (!/^data:/i.test(u)) urls.add(u); return m; });
+  for (const u of urls) {
+    let full = null, d = null;
+    try { full = new URL(u, base).href; } catch (_) {}
+    if (full) {
+      try {
+        const r = await fetch(proxied(full) || full, { mode:'cors', credentials:'omit', cache:'force-cache' });
+        if (r.ok) { const b = await r.arrayBuffer(); if (b.byteLength < 6e6) d = `data:font/woff2;base64,${b64(b)}`; }
+      } catch (_) {}
+    }
+    if (!d) { note('a webfont could not be embedded (CORS); that text falls back to a system face'); return null; }
+    css = css.split(u).join(d);
+  }
+  return css;
+}
+
 async function collectFontFaces(doc, baseUrl, note){
   let out = '';
   for (const sheet of Array.from(doc.styleSheets || [])) {
     let rules = null;
     try { rules = sheet.cssRules; }
-    catch (_) { note('a cross-origin stylesheet could not be inspected; its webfonts fall back to a system face'); continue; }
+    catch (_) {
+      /* Cross-origin: the browser hides the RULES, but the bytes are still
+         fetchable — and through the relay they are fetchable even from a host
+         that sends no CORS header at all. Giving up here meant a broadcast
+         graphic exported in a system fallback instead of its brand typeface,
+         which on air is a defect rather than a cosmetic difference. */
+      const href = sheet.href;
+      const via  = href ? (proxied(href) || href) : null;
+      let recovered = 0;
+      if (via) {
+        try {
+          const r = await fetch(via, { mode:'cors', credentials:'omit', cache:'no-store' });
+          if (r.ok) {
+            for (const block of fontFaceBlocks(await r.text())) {
+              const css = await embedFontUrls(block, href, note);
+              if (css) { out += css + '\n'; recovered++; }
+            }
+          }
+        } catch (_) {}
+      }
+      if (!recovered) note('a cross-origin stylesheet could not be inspected; its webfonts fall back to a system face');
+      continue;
+    }
     for (const rule of Array.from(rules || [])) {
       if (rule.constructor.name !== 'CSSFontFaceRule') continue;
-      let css = rule.cssText;
-      const urls = new Set();
-      css.replace(/url\(\s*["']?([^"')]+)["']?\s*\)/gi, (m, u) => { if (!/^data:/i.test(u)) urls.add(u); return m; });
-      let allOk = true;
-      for (const u of urls) {
-        let full = null, d = null;
-        try { full = new URL(u, sheet.href || baseUrl).href; } catch (_) {}
-        if (full) {
-          try {
-            const r = await fetch(proxied(full) || full, { mode:'cors', credentials:'omit', cache:'force-cache' });
-            if (r.ok) { const b = await r.arrayBuffer(); if (b.byteLength < 6e6) d = `data:font/woff2;base64,${b64(b)}`; }
-          } catch (_) {}
-        }
-        if (d) css = css.split(u).join(d); else allOk = false;
-      }
-      if (allOk) out += css + '\n';
-      else note('a webfont could not be embedded (CORS); that text falls back to a system face');
+      const embedded = await embedFontUrls(rule.cssText, sheet.href || baseUrl, note);
+      if (embedded) out += embedded + '\n';
     }
   }
   return out;
@@ -2627,6 +2863,7 @@ function boot(){
   bindDropAndPaste();
   bindLive();
   bindSimple();
+  bindIntro();
   /* The only JS the rotate prompt needs: a way out for anyone who genuinely
      wants it upright. Whether it SHOWS is CSS's decision, so it can never
      disagree with the actual orientation. */
@@ -2791,6 +3028,7 @@ function bindControls(){
   on($('#btnRail'), 'click', () => { document.body.classList.toggle('no-rail'); layout(); });
   on($('#btnInsp'), 'click', () => { document.body.classList.toggle('no-insp'); layout(); });
   on($('#btnHelp'), 'click', () => $('#help').showModal());
+  on($('#helpReplay'), 'click', () => { const d = $('#help'); if (d && d.close) d.close(); openIntro(); });
   on($('#helpClose'), 'click', () => $('#help').close());
   $$('[data-demo]').forEach(b => on(b, 'click', () => loadDemo(b.dataset.demo)));
 }
@@ -3495,10 +3733,36 @@ function setMode(v){ MODE = v; syncControls(); }
 
 /* Called from syncControls so the two views never disagree about what is shown. */
 function syncLiveView(){
+  /* SIMPLE MODE SHOWS THE FEED, NOT A STILL.
+     The instance iframe has always been running and animating; the stage was
+     showing the processed canvas, which only repaints on a rerun — so a moving
+     graphic appeared frozen. Promoting the tile in place makes the running
+     instance the view, at whatever rate the browser composites, for free.
+     The instance is never re-parented: moving a live iframe reloads it. */
+  const solo = S.opts.ui === 'simple' && MODE !== 'live'
+            && !!(S.source && S.source.inst && S.source.inst.ready);
+  const mv = $('#mv');
+  mv.classList.toggle('solo', solo);
+  const badge = $('#liveBadge');
+  if (badge) badge.hidden = !solo;
+  if (solo) {
+    mv.classList.remove('off');
+    renderMV();
+    /* The other instances are parked OFF-SCREEN, never display:none. They are
+       still running and still grabbable, and an element with no layout box has
+       no computed geometry — the repaint would export an empty frame from it.
+       Same trap that hid the multiviewer behind [hidden] in 0.2.0. */
+    LIVE.list.forEach(i => { if (i.tile) i.tile.classList.toggle('parked', i !== S.source.inst); });
+    requestAnimationFrame(() => LIVE.list.forEach(fitTile));
+  } else {
+    LIVE.list.forEach(i => { if (i.tile) i.tile.classList.remove('parked'); });
+  }
+  document.body.classList.toggle('feed', solo);
+
   const live = MODE === 'live';
   /* .off, not [hidden]: the running instances are inside #mv, and an element
      with no layout box has no computed geometry for the repaint to read. */
-  $('#mv').classList.toggle('off', !live);
+  if (!solo) $('#mv').classList.toggle('off', !live);
   $('#transport').hidden = !live;
   $('#mvNone').style.display = LIVE.list.length ? 'none' : '';
   const empty = $('#empty');
@@ -3648,6 +3912,10 @@ async function grabAll(){
    never switched on quietly. */
 function addRelayAction(t){
   if (!t) return;
+  /* Hold this one open. It is the only route past a CORS refusal, and a nine
+     second life on it is the difference between a tool that works and one that
+     "still gets blocked". */
+  if (t.stick) t.stick();
   const row = el('div', { style: { marginTop: '9px', display: 'flex', gap: '8px', alignItems: 'center' } });
   const go = el('button', { className: 'btn primary sm', textContent: 'Use the relay' });
   const why = el('span', { style: { fontSize: '11px', color: 'var(--ink-3)' }, textContent: 'routes this URL through our server' });
@@ -3672,6 +3940,10 @@ function bindSimple(){
   on($('#sbFile'),    'click', () => $('#fileInput').click());
   on($('#sbReset'),   'click', () => { S.opts.seq = 1; saveOpts(); syncSimple(); toast('Numbering reset', 'The next clip is 001.', 'ok'); });
   on($('#sbRefresh'), 'click', () => refreshSource(true).catch(showError));
+  on($('#reload'), 'click', () => {
+    const u = ($('#url').value || '').trim() || (S.source && S.source.url);
+    if (u) grabUrl(u).catch(showError); else toast('Nothing to re-fetch', 'Paste a link first.', 'warn');
+  });
   on($('#sbRefetch'), 'change', e => { S.opts.refetch = e.target.checked; saveOpts(); syncSimple(); });
   on($('#sbDownload'),'click', () => downloadClip().catch(showError));
 }
@@ -3786,6 +4058,55 @@ async function downloadClip(){
       toast('Saved', `<code>${fn}</code> · ${d.width} × ${d.height} · ${bytes(blob.size)}${a}`, 'ok');
     }
   } finally { done(); btn.disabled = !S.source; }
+}
+
+/* ═══════════════════ the opening ═══════════════════
+   Mark first, then five panels covering the only loop that matters: point it at
+   a link, get past a refusal, download, push the next graphic, download again.
+   Skip is on every panel and the whole thing is remembered once dismissed. */
+const INTRO_KEY = 'alphagrab.intro.v1';
+let introAt = 1;
+const INTRO_N = 5;
+
+function introSeen(){ try { return localStorage.getItem(INTRO_KEY) === '1'; } catch (_) { return false; } }
+function introDone(){
+  try { localStorage.setItem(INTRO_KEY, '1'); } catch (_) {}
+  const n = $('#intro'); if (n) n.hidden = true;
+  const u = $('#url'); if (u) u.focus();
+}
+
+function introShow(at){
+  introAt = clamp(at, 1, INTRO_N);
+  $$('.intro-slide').forEach(s => s.classList.toggle('on', +s.dataset.slide === introAt));
+  $$('#introDots i').forEach((d, i) => d.classList.toggle('on', i + 1 === introAt));
+  $('#introBack').disabled = introAt === 1;
+  $('#introNext').textContent = introAt === INTRO_N ? 'Start' : 'Next';
+  $('#intro').hidden = false;
+}
+
+function openIntro(){ introShow(1); }
+
+function bindIntro(){
+  const dots = $('#introDots');
+  for (let i = 0; i < INTRO_N; i++) {
+    const d = el('i'); on(d, 'click', () => introShow(i + 1)); dots.append(d);
+  }
+  on($('#introSkip'), 'click', introDone);
+  on($('#introBack'), 'click', () => introShow(introAt - 1));
+  on($('#introNext'), 'click', () => introAt === INTRO_N ? introDone() : introShow(introAt + 1));
+  on(document, 'keydown', e => {
+    if ($('#intro').hidden) return;
+    if (e.key === 'Escape')     { e.preventDefault(); introDone(); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); introAt === INTRO_N ? introDone() : introShow(introAt + 1); }
+    if (e.key === 'ArrowLeft')  { e.preventDefault(); introShow(introAt - 1); }
+  });
+
+  /* The mark leads, then the panels. Someone who has seen it before gets
+     neither and lands straight in the tool. */
+  if (introSeen()) return;
+  const sp = $('#splash');
+  sp.hidden = false;
+  setTimeout(() => { sp.remove(); introShow(1); }, 2400);
 }
 
 /* go */
