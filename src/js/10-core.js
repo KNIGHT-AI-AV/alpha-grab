@@ -248,7 +248,7 @@ const S = AG.state = {
     seq: 1,
     refetch: true,
     /* fetch */
-    proxy: '', useProxy: false, settle: 900, autoRun: true,
+    proxy: '', useProxy: false, settle: 2500, autoRun: true,
     /* design canvas an HTML template lays out on before it is scaled */
     domW: 1920, domH: 1080
   }

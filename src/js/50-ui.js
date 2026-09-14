@@ -1200,7 +1200,9 @@ async function downloadClip(){
     if (empty) {
       toast('Saved, but the frame is empty',
         `<code>${fn}</code> is fully transparent — nothing was painted. ` +
-        `If this is a live viz, check a graphic is actually on air, then download again.`, 'warn', 8000);
+        `Either nothing is on air, or the graphic arrived after the <b>${S.opts.settle} ms</b> settle window: ` +
+        `a template that renders from a live feed paints a second or two AFTER the page loads. ` +
+        `Raise <b>Template settle</b> under Full controls and download again.`, 'warn', 10000);
     }
     /* Say it when two clips came from the same bytes. The export succeeded and
        the number advanced, so nothing looks wrong — and a folder of identical

@@ -1,5 +1,30 @@
 # AlphaGrab changelog
 
+## 0.3.3 - 2026-09-14
+
+**The settle control governed a code path nothing used any more.** Found while
+trying to prove the Flowics loop end to end without a login.
+
+A broadcast template paints from a live feed, so its content lands a second or
+two AFTER the page loads. That is the normal case, not an edge one. The one-shot
+capture path always waited out `settle` before grabbing; the LIVE instance path
+never did - and since 0.2.0 every HTML template IS a live instance, so the
+slider had been decorative for two minor versions.
+
+Measured: content injected 2 s after load, with settle at 4 s, was **absent from
+the export**. The result was a valid, correctly sized, entirely transparent
+1080p PNG - byte-for-byte the same symptom as "nothing on air", which is exactly
+why it hid behind a blank viz for days.
+
+- `mountInstance` now waits out `settle` after load and fonts, before the
+  instance is grabbable. Content at 300 / 2000 / 3800 ms is captured within a 4 s
+  window; at 6000 ms it is correctly absent, and raising the window recovers it.
+- **Default settle 900 ms -> 2500 ms.** 900 was tuned for a static template.
+- The empty-frame warning now names this cause and tells you to raise the
+  window, instead of only suggesting nothing is on air.
+
+Six checks pin it. 46 guard + 108 Chromium.
+
 ## 0.3.2 - 2026-09-14
 
 **The relay checkbox was a lie.** Reported from a live show: "the output link

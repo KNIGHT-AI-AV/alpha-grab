@@ -437,7 +437,7 @@ body.simple .transport[hidden]{display:none}
 
 <!-- ══════════════════════════ top bar ══════════════════════════ -->
 <header class="bar">
-  <div class="brand" title="AlphaGrab v0.3.2">
+  <div class="brand" title="AlphaGrab v0.3.3">
     <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
       <defs><clipPath id="lm"><rect x="2" y="2" width="28" height="28" rx="7"/></clipPath></defs>
       <g clip-path="url(#lm)">
@@ -796,8 +796,8 @@ body.simple .transport[hidden]{display:none}
     <summary><span class="dot"></span>About<span class="chev">▶</span></summary>
     <div class="pbody">
       <dl class="kv">
-        <dt>Version</dt><dd>0.3.2</dd>
-        <dt>Build</dt><dd>2026-09-14·f458d3a0</dd>
+        <dt>Version</dt><dd>0.3.3</dd>
+        <dt>Build</dt><dd>2026-09-14·bed10d4a</dd>
         <dt>Canvas limit</dt><dd id="ceilVal">—</dd>
         <dt>Network</dt><dd>fetch only</dd>
       </dl>
@@ -896,8 +896,8 @@ http.createServer(async (req, res) => {
 'use strict';
 
 const AG = window.AG = {
-  VERSION: '0.3.2',
-  BUILD:   '2026-09-14·f458d3a0',
+  VERSION: '0.3.3',
+  BUILD:   '2026-09-14·bed10d4a',
 
   /* Advertised limits. tests/guard.mjs pins the marketing copy to these. */
   MAX_DIM: 8192,          // largest side offered by the UI (probe may allow more)
@@ -1139,7 +1139,7 @@ const S = AG.state = {
     seq: 1,
     refetch: true,
     /* fetch */
-    proxy: '', useProxy: false, settle: 900, autoRun: true,
+    proxy: '', useProxy: false, settle: 2500, autoRun: true,
     /* design canvas an HTML template lays out on before it is scaled */
     domW: 1920, domH: 1080
   }
@@ -1797,6 +1797,16 @@ async function mountInstance(inst, host){
   const doc = frame.contentDocument;
   if (!doc) throw new AGError('Could not read the rendered template', 'The iframe document was not accessible.');
   try { if (doc.fonts && doc.fonts.ready) await Promise.race([doc.fonts.ready, new Promise(r => setTimeout(r, 4000))]); } catch (_) {}
+
+  /* Let the template run before anyone grabs it. The one-shot path always did
+     this; the live path did NOT, and since 0.2.0 every HTML template is a live
+     instance — so the settle control governed a code path nothing used any more.
+     Measured: content injected 2 s after load was missing from the export with
+     settle at 4 s, and the export was a valid, correctly sized, entirely blank
+     1080p frame. That is the same symptom as "nothing on air", which is exactly
+     why it hid: a broadcast graphic that arrives over a socket a second or two
+     after the page parses is the NORMAL case, not an edge one. */
+  await new Promise(r => setTimeout(r, clamp(S.opts.settle, 0, AG.SETTLE_MAX)));
 
   /* An iframe is composited TRANSPARENTLY only while its used color-scheme
      matches the embedder's. Mismatch and Chromium paints an opaque base canvas
@@ -3703,7 +3713,9 @@ async function downloadClip(){
     if (empty) {
       toast('Saved, but the frame is empty',
         `<code>${fn}</code> is fully transparent — nothing was painted. ` +
-        `If this is a live viz, check a graphic is actually on air, then download again.`, 'warn', 8000);
+        `Either nothing is on air, or the graphic arrived after the <b>${S.opts.settle} ms</b> settle window: ` +
+        `a template that renders from a live feed paints a second or two AFTER the page loads. ` +
+        `Raise <b>Template settle</b> under Full controls and download again.`, 'warn', 10000);
     }
     /* Say it when two clips came from the same bytes. The export succeeded and
        the number advanced, so nothing looks wrong — and a folder of identical

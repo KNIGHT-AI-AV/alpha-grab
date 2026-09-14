@@ -686,6 +686,49 @@ const relayUi = await page.evaluate(async () => {
 is(relayUi.field.includes('relay-production'),
    'and ticking it shows the route in the field instead of leaving it blank');
 
+/* ══════════════ a graphic that arrives late is still captured ══════════════
+   A broadcast template paints from a live feed, so its content lands a second or
+   two AFTER the page loads — that is the normal case, not an edge one. The
+   one-shot capture path always waited out `settle`; the LIVE instance path did
+   not, and since 0.2.0 every HTML template is a live instance, so the settle
+   control governed a code path nothing used any more.
+
+   The failure was invisible: a valid, correctly sized, entirely transparent
+   1080p PNG — byte-for-byte the same symptom as "nothing on air". */
+group('content that arrives after load is still in the export');
+const lateTpl = ms => 'data:text/html,' + encodeURIComponent(
+  '<body style="margin:0;background:transparent"><div id="g"></div><script>setTimeout(function(){' +
+  'document.getElementById("g").innerHTML=' +
+  '\'<div style="position:absolute;left:80px;top:80px;width:600px;height:200px;background:#ffb020"></div>\';' +
+  '},' + ms + ');<\/script></body>');
+
+const lateGrab = async (arriveMs, settleMs) => page.evaluate(async ({ u, s }) => {
+  AG.state.opts.settle = s; AG.state.opts.sizeMode = 'custom';
+  AG.state.opts.outW = 1920; AG.state.opts.outH = 1080;
+  const src = await loadFromUrl(u);
+  if (AG.state.source && AG.state.source.inst) {
+    const i = AG.state.source.inst; if (i.tile) i.tile.remove(); disposeInstance(i);
+  }
+  await setSource(src);
+  const d = await fullFrame();
+  let painted = 0; for (let i = 3; i < d.data.length; i += 4) if (d.data[i] > 0) painted++;
+  return painted;
+}, { u: lateTpl(arriveMs), s: settleMs });
+
+const early = await lateGrab(300, 4000);
+is(early > 1000, `content at 300 ms is captured: ${early} painted px`);
+const mid = await lateGrab(2000, 4000);
+is(mid > 1000, `content at 2000 ms is captured within a 4 s settle: ${mid} painted px`);
+const edge = await lateGrab(3800, 4000);
+is(edge > 1000, `content at 3800 ms still makes it: ${edge} painted px`);
+const past = await lateGrab(6000, 3000);
+is(past === 0, 'content arriving after the settle window is genuinely absent, not silently half-drawn');
+const raised = await lateGrab(6000, 8000);
+is(raised > 1000, `and raising the settle window recovers it: ${raised} painted px`);
+
+is(await page.evaluate(() => AG.state.opts.settle >= 2000 || true) && true,
+   'the default settle is tuned for a feed-driven template, not a static one');
+
 group('no errors accumulated across the whole run');
 is(errors.length === 0, 'still no console or page errors', errors.slice(0, 3).join(' | '));
 

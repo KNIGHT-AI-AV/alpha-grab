@@ -96,6 +96,16 @@ async function mountInstance(inst, host){
   if (!doc) throw new AGError('Could not read the rendered template', 'The iframe document was not accessible.');
   try { if (doc.fonts && doc.fonts.ready) await Promise.race([doc.fonts.ready, new Promise(r => setTimeout(r, 4000))]); } catch (_) {}
 
+  /* Let the template run before anyone grabs it. The one-shot path always did
+     this; the live path did NOT, and since 0.2.0 every HTML template is a live
+     instance — so the settle control governed a code path nothing used any more.
+     Measured: content injected 2 s after load was missing from the export with
+     settle at 4 s, and the export was a valid, correctly sized, entirely blank
+     1080p frame. That is the same symptom as "nothing on air", which is exactly
+     why it hid: a broadcast graphic that arrives over a socket a second or two
+     after the page parses is the NORMAL case, not an edge one. */
+  await new Promise(r => setTimeout(r, clamp(S.opts.settle, 0, AG.SETTLE_MAX)));
+
   /* An iframe is composited TRANSPARENTLY only while its used color-scheme
      matches the embedder's. Mismatch and Chromium paints an opaque base canvas
      under it — white for a light frame, #121212 for a dark one — and no amount
