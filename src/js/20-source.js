@@ -372,18 +372,27 @@ function fontFaceBlocks(cssText){
    because of a dead fallback nobody has used since 2015, and reported the
    typeface as lost. Keep what resolves, drop what does not, and only give up
    when NOTHING in the face could be fetched. */
-async function embedFontUrls(css, base, note){
+const fontFamilyOf = css => {
+  const m = /font-family\s*:\s*([^;}]+)/i.exec(css || '');
+  return m ? m[1].trim().replace(/^["']|["']$/g, '').toLowerCase() : '';
+};
+
+async function embedFontUrls(css, base, note, ctx){
   const urls = [...new Set([...css.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/gi)]
     .map(m => m[1]).filter(u => !/^data:/i.test(u)))];
   if (!urls.length) return css;
 
-  let kept = 0, dropped = 0;
+  let kept = 0, dropped = 0, answered = 0;
   for (const u of urls) {
     let full = null, d = null;
     try { full = new URL(u, base).href; } catch (_) {}
     if (full) {
       try {
         const r = await fetchAsset(full, { mode:'cors', credentials:'omit', cache:'force-cache' });
+        /* A response AT ALL — even a 404 — means the server was reachable and
+           the bytes simply are not there. That is a different fault from a CORS
+           refusal and it sends the operator somewhere different. */
+        if (r) answered++;
         if (r && r.ok) { const b = await r.arrayBuffer(); if (b.byteLength < 6e6) d = `data:font/woff2;base64,${b64(b)}`; }
       } catch (_) {}
     }
@@ -396,7 +405,21 @@ async function embedFontUrls(css, base, note){
       dropped++;
     }
   }
-  if (!kept) { note('a webfont could not be embedded (CORS); that text falls back to a system face'); return null; }
+  if (!kept) {
+    /* Hold the complaint. Icon fonts routinely declare the SAME family twice —
+       once with real woff2/ttf sources and once with a legacy .svg fallback that
+       has been dead since about 2015. Flowics ships two of those, and both 404
+       on their own CDN. Reporting them said "a webfont could not be embedded
+       (CORS)" about a family that was fully embedded a rule earlier, blaming a
+       relay problem for a dead URL and sending the operator to fix the wrong
+       thing. Decide once every rule has been seen. */
+    const why = answered
+      ? 'a webfont source is missing from its own server (404); that text falls back to a system face'
+      : 'a webfont could not be embedded (CORS); that text falls back to a system face';
+    if (ctx) ctx.failed.push({ family: fontFamilyOf(css), why });
+    else note(why);
+    return null;
+  }
   if (dropped) note('a webfont had ' + dropped + ' unreachable source' + (dropped > 1 ? 's' : '') +
                     ' dropped; the face itself was embedded');
   return css.replace(/src\s*:\s*,/i, 'src:');
@@ -404,6 +427,7 @@ async function embedFontUrls(css, base, note){
 
 async function collectFontFaces(doc, baseUrl, note){
   let out = '';
+  const ctx = { ok: new Set(), failed: [] };
   for (const sheet of Array.from(doc.styleSheets || [])) {
     let rules = null;
     try { rules = sheet.cssRules; }
@@ -421,8 +445,8 @@ async function collectFontFaces(doc, baseUrl, note){
           const r = await fetchAsset(href, { mode:'cors', credentials:'omit', cache:'no-store' });
           if (r && r.ok) {
             for (const block of fontFaceBlocks(await r.text())) {
-              const css = await embedFontUrls(block, href, note);
-              if (css) { out += css + '\n'; recovered++; }
+              const css = await embedFontUrls(block, href, note, ctx);
+              if (css) { out += css + '\n'; recovered++; ctx.ok.add(fontFamilyOf(css)); }
             }
           }
         } catch (_) {}
@@ -432,10 +456,14 @@ async function collectFontFaces(doc, baseUrl, note){
     }
     for (const rule of Array.from(rules || [])) {
       if (rule.constructor.name !== 'CSSFontFaceRule') continue;
-      const embedded = await embedFontUrls(rule.cssText, sheet.href || baseUrl, note);
-      if (embedded) out += embedded + '\n';
+      const embedded = await embedFontUrls(rule.cssText, sheet.href || baseUrl, note, ctx);
+      if (embedded) { out += embedded + '\n'; ctx.ok.add(fontFamilyOf(embedded)); }
     }
   }
+  /* A family that another rule embedded successfully is not lost, whatever this
+     rule's dead sources did. Only say something when the typeface really will
+     not be in the frame. */
+  for (const f of ctx.failed) if (!ctx.ok.has(f.family)) note(f.why);
   return out;
 }
 
