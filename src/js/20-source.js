@@ -475,6 +475,19 @@ function domToSvg(doc, W, H, fontCss, note){
   const defs = [], body = [];
   let gid = 0;
 
+  /* A gradient stop keeps its alpha, and cssColor cannot be used for one: that
+     helper returns null at alpha 0 because a fully transparent BOX is nothing to
+     draw. A fully transparent STOP is the opposite — it is the whole point of
+     the fade. SVG also wants the two halves separately; handing it
+     `stop-color="rgba(255,255,255,0)"` rendered the fade as opaque grey, so a
+     lower third that dissolves to nothing on air exported as a solid slab. */
+  const stopColor = c => {
+    const m = /^rgba?\(([^)]+)\)/i.exec(c || '');
+    if (!m) return { fill: c, opacity: 1 };
+    const p = m[1].split(',').map(v => parseFloat(v));
+    return { fill: `rgb(${p[0]|0},${p[1]|0},${p[2]|0})`, opacity: p.length > 3 ? p[3] : 1 };
+  };
+
   const cssColor = c => {
     const m = /^rgba?\(([^)]+)\)/i.exec(c || '');
     if (!m) return null;
@@ -626,21 +639,38 @@ function domToSvg(doc, W, H, fontCss, note){
     }
     const stops = parts.map((p, i) => {
       const cm = /^(rgba?\([^)]*\)|#[0-9a-f]{3,8}|[a-z]+)\s*([\d.]+%)?/i.exec(p);
-      return cm ? { c: cm[1], o: cm[2] || round(i / Math.max(1, parts.length - 1) * 100, 2) + '%' } : null;
+      if (!cm) return null;
+      return { c: stopColor(cm[1]), o: cm[2] || round(i / Math.max(1, parts.length - 1) * 100, 2) + '%' };
     }).filter(Boolean);
     if (stops.length < 2) return null;
     const rad = (angle - 90) * Math.PI / 180;
     const id = 'agg' + (gid++);
     defs.push(`<linearGradient id="${id}" x1="${round(50 - Math.cos(rad) * 50,2)}%" y1="${round(50 - Math.sin(rad) * 50,2)}%" x2="${round(50 + Math.cos(rad) * 50,2)}%" y2="${round(50 + Math.sin(rad) * 50,2)}%">` +
-      stops.map(s => `<stop offset="${s.o}" stop-color="${XESC(s.c)}"/>`).join('') + `</linearGradient>`);
+      stops.map(s => `<stop offset="${s.o}" stop-color="${XESC(s.c.fill)}"` +
+        (s.c.opacity < 1 ? ` stop-opacity="${round(s.c.opacity,3)}"` : '') + `/>`).join('') + `</linearGradient>`);
     return `url(#${id})`;
   };
 
+  /* <rect rx> is uniform, so reading only border-top-left-radius squared off
+     every shape rounded on one end — the pill cap that finishes a location
+     strap came back as a hard corner. When the four radii agree a rect is still
+     the right (and smaller) output; when they do not, draw the path. */
   const boxRect = (r, fill, cs, extra) => {
-    const rad = parseFloat(cs.borderTopLeftRadius) || 0;
-    return `<rect x="${round(r.left,2)}" y="${round(r.top,2)}" width="${round(r.width,2)}" height="${round(r.height,2)}"` +
-           (rad ? ` rx="${round(Math.min(rad, r.width / 2, r.height / 2),2)}"` : '') +
-           ` fill="${fill}"${extra || ''}/>`;
+    const cap = v => Math.max(0, Math.min(parseFloat(v) || 0, r.width / 2, r.height / 2));
+    const tl = cap(cs.borderTopLeftRadius),    tr = cap(cs.borderTopRightRadius);
+    const br = cap(cs.borderBottomRightRadius), bl = cap(cs.borderBottomLeftRadius);
+    const x = round(r.left, 2), y = round(r.top, 2), w = round(r.width, 2), h = round(r.height, 2);
+    const uniform = [tr, br, bl].every(v => Math.abs(v - tl) < 0.2);
+    if (uniform)
+      return `<rect x="${x}" y="${y}" width="${w}" height="${h}"` +
+             (tl ? ` rx="${round(tl,2)}"` : '') + ` fill="${fill}"${extra || ''}/>`;
+    const R = v => round(v, 2);
+    const d = `M${R(r.left + tl)},${y}` +
+      `H${R(r.left + r.width - tr)}` + (tr ? `A${R(tr)},${R(tr)} 0 0 1 ${R(r.left + r.width)},${R(r.top + tr)}` : '') +
+      `V${R(r.top + r.height - br)}` + (br ? `A${R(br)},${R(br)} 0 0 1 ${R(r.left + r.width - br)},${R(r.top + r.height)}` : '') +
+      `H${R(r.left + bl)}` + (bl ? `A${R(bl)},${R(bl)} 0 0 1 ${x},${R(r.top + r.height - bl)}` : '') +
+      `V${R(r.top + tl)}` + (tl ? `A${R(tl)},${R(tl)} 0 0 1 ${R(r.left + tl)},${y}` : '') + 'Z';
+    return `<path d="${d}" fill="${fill}"${extra || ''}/>`;
   };
   const imageTag = (r, href, fit) =>
     `<image x="${round(r.left,2)}" y="${round(r.top,2)}" width="${round(r.width,2)}" height="${round(r.height,2)}"` +
