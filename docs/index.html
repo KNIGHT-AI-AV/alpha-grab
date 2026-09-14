@@ -272,7 +272,7 @@ body.dragging .dropzone{display:flex}
 .qrow .x:hover{color:var(--red)}
 
 /* ───────────────────────── toast / status ───────────────────────── */
-#toasts{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:200;max-width:min(430px,calc(100vw - 32px))}
+#toasts{position:fixed;right:16px;bottom:16px;pointer-events:none;display:flex;flex-direction:column;gap:8px;z-index:200;max-width:min(430px,calc(100vw - 32px))}
 .toast{
   background:var(--panel-2);border:1px solid var(--line);border-left:3px solid var(--gold);
   border-radius:var(--radius-sm);padding:10px 13px;box-shadow:var(--shadow);font-size:13px;
@@ -518,7 +518,7 @@ body:not(.has-source) #pan{display:none}
    browser, so the instance never moves — the multiviewer simply goes solo. */
 body.simple #mv.solo{padding:14px;gap:0}
 body.simple #mv.solo .mv-grid{grid-template-columns:minmax(0,1fr);place-items:center;height:100%}
-body.simple #mv.solo .inst{border:0;background:none;width:100%;max-width:100%}
+body.simple #mv.solo .inst{border:0;background:none;width:auto;max-width:100%;margin:auto}
 body.simple #mv.solo .inst.sel{box-shadow:none}
 body.simple #mv.solo .inst-head{display:none}
 body.simple #mv.solo .inst-view{cursor:default;border-radius:var(--radius)}
@@ -540,6 +540,28 @@ body.feed #pan{display:none}
 body.feed #empty{display:none!important}
 /* Parked, not removed: out of sight, still laid out, still capturable. */
 body.simple #mv.solo .inst.parked{position:absolute;left:-99999px;top:0;width:640px}
+
+/* Solo: the picture is centred in whatever room the stage has, both axes. */
+body.simple #mv.solo{display:grid;place-items:center;overflow:hidden;padding:14px}
+/* align-content:center too — the base grid rule sets `start`, which pins the
+   picture to the top of a tall window instead of centring it in the room. */
+body.simple #mv.solo .mv-grid{display:grid;place-items:center;align-content:center;
+  justify-content:center;width:100%;height:100%;grid-template-columns:minmax(0,auto)}
+
+/* The remembered save folder. `.on` is the state that matters — it is the
+   difference between a dialog on every clip and none at all. */
+#sbFolder{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#sbFolder.on{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+#sbFolder.on::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;
+  background:var(--ok);margin-right:6px;vertical-align:middle}
+
+/* Toasts clear the simple bar instead of covering it. The bar holds Download —
+   a notice that hides the only control the operator needs is worse than no
+   notice, and it was doing exactly that with three stacked cards. */
+body.simple #toasts{bottom:calc(var(--simple-bar-h, 58px) + 14px)}
+#toasts>*{pointer-events:auto}
+.toast ul{margin:5px 0 0;padding-left:17px;display:flex;flex-direction:column;gap:3px}
+.toast li{line-height:1.45}
 </style>
 </head>
 <body>
@@ -662,7 +684,7 @@ body.simple #mv.solo .inst.parked{position:absolute;left:-99999px;top:0;width:64
 
 <!-- ══════════════════════════ top bar ══════════════════════════ -->
 <header class="bar">
-  <div class="brand" title="AlphaGrab v0.4.1">
+  <div class="brand" title="AlphaGrab v0.5.0">
     <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
       <defs><clipPath id="lm"><rect x="2" y="2" width="28" height="28" rx="7"/></clipPath></defs>
       <g clip-path="url(#lm)">
@@ -955,6 +977,7 @@ body.simple #mv.solo .inst.parked{position:absolute;left:-99999px;top:0;width:64
 
     <div class="sb-right">
       <span class="sb-next">next<b id="sbNext">clip_001.png</b></span>
+      <button class="btn sm" id="sbFolder" hidden>Save to…</button>
       <button class="btn sm" id="sbReset" title="Start the numbering again at 001">↺</button>
       <button class="btn primary lg" id="sbDownload" title="Re-fetch, render at full size, save the next clip  (Enter)">Download</button>
     </div>
@@ -1025,8 +1048,8 @@ body.simple #mv.solo .inst.parked{position:absolute;left:-99999px;top:0;width:64
     <summary><span class="dot"></span>About<span class="chev">▶</span></summary>
     <div class="pbody">
       <dl class="kv">
-        <dt>Version</dt><dd>0.4.1</dd>
-        <dt>Build</dt><dd>2026-09-14·a5651515</dd>
+        <dt>Version</dt><dd>0.5.0</dd>
+        <dt>Build</dt><dd>2026-09-14·a687b6ee</dd>
         <dt>Canvas limit</dt><dd id="ceilVal">—</dd>
         <dt>Network</dt><dd>fetch only</dd>
       </dl>
@@ -1126,8 +1149,8 @@ http.createServer(async (req, res) => {
 'use strict';
 
 const AG = window.AG = {
-  VERSION: '0.4.1',
-  BUILD:   '2026-09-14·a5651515',
+  VERSION: '0.5.0',
+  BUILD:   '2026-09-14·a687b6ee',
 
   /* Advertised limits. tests/guard.mjs pins the marketing copy to these. */
   MAX_DIM: 8192,          // largest side offered by the UI (probe may allow more)
@@ -1308,11 +1331,101 @@ function busy(msg){
 const raf = () => new Promise(r => requestAnimationFrame(() => r()));
 
 /* ─────────────────────────── download ─────────────────────────── */
-function saveBlob(blob, filename){
+/* ─────────────────── where the clips land ───────────────────
+   The point of this tool is a LOOP: push a graphic, download, push the next,
+   download. A Save-As dialog on every pass turns a four-second loop into a
+   twenty-second one, and the operator is doing it live.
+
+   `showDirectoryPicker` fixes it properly — the folder is chosen ONCE and every
+   later write goes straight in with no dialog at all. The handle survives a
+   reload because it is structured-cloneable and can sit in IndexedDB; what does
+   NOT survive is the permission, so it is re-requested on the next download
+   click, which is a user gesture and therefore allowed to ask.
+
+   Chromium only. Firefox and Safari have no equivalent and cannot be given one,
+   so the control hides itself there and the ordinary download path stands. */
+const FS_DB = 'alphagrab', FS_STORE = 'handles', FS_KEY = 'saveDir';
+
+function idb(){
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(FS_DB, 1);
+    r.onupgradeneeded = () => { try { r.result.createObjectStore(FS_STORE); } catch (_) {} };
+    r.onsuccess = () => res(r.result);
+    r.onerror   = () => rej(r.error);
+  });
+}
+async function idbGet(key){
+  try {
+    const db = await idb();
+    return await new Promise((res, rej) => {
+      const q = db.transaction(FS_STORE, 'readonly').objectStore(FS_STORE).get(key);
+      q.onsuccess = () => res(q.result || null); q.onerror = () => rej(q.error);
+    });
+  } catch (_) { return null; }
+}
+async function idbSet(key, val){
+  try {
+    const db = await idb();
+    await new Promise((res, rej) => {
+      const t = db.transaction(FS_STORE, 'readwrite');
+      if (val === null) t.objectStore(FS_STORE).delete(key); else t.objectStore(FS_STORE).put(val, key);
+      t.oncomplete = () => res(); t.onerror = () => rej(t.error);
+    });
+    return true;
+  } catch (_) { return false; }
+}
+
+const canPickFolder = () => typeof window.showDirectoryPicker === 'function' && window.isSecureContext;
+
+let saveDir = null;                       // FileSystemDirectoryHandle or null
+
+async function loadSaveDir(){
+  if (!canPickFolder()) return null;
+  saveDir = await idbGet(FS_KEY);
+  return saveDir;
+}
+
+/* Ask once. `startIn:'downloads'` opens where they would have saved anyway. */
+async function pickSaveDir(){
+  const h = await window.showDirectoryPicker({ id: 'alphagrab-clips', mode: 'readwrite', startIn: 'downloads' });
+  saveDir = h;
+  await idbSet(FS_KEY, h);
+  return h;
+}
+async function forgetSaveDir(){ saveDir = null; await idbSet(FS_KEY, null); }
+
+/* 'granted' now, 'granted' after asking, or null. Only ever call this from
+   inside a click — outside a user gesture requestPermission rejects. */
+async function saveDirReady(ask){
+  if (!saveDir || !saveDir.queryPermission) return null;
+  try {
+    if (await saveDir.queryPermission({ mode: 'readwrite' }) === 'granted') return saveDir;
+    if (!ask) return null;
+    if (await saveDir.requestPermission({ mode: 'readwrite' }) === 'granted') return saveDir;
+  } catch (_) {}
+  return null;
+}
+
+/* Returns how it was saved, so the caller can say where the file went rather
+   than leaving the operator hunting for it. */
+async function saveBlob(blob, filename, opts){
+  const dir = (opts && opts.dir) || null;
+  if (dir) {
+    try {
+      const fh = await dir.getFileHandle(filename, { create: true });
+      const w  = await fh.createWritable();
+      await w.write(blob); await w.close();
+      return { how: 'folder', where: dir.name || 'the chosen folder' };
+    } catch (e) {
+      /* Fall through to the browser's own download rather than losing the
+         frame — a revoked folder permission must not cost a live grab. */
+    }
+  }
   const url = URL.createObjectURL(blob);
   const a = el('a', { href: url, download: filename });
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return { how: 'download', where: null };
 }
 
 /* ───────────────────── real canvas ceiling probe ─────────────────────
@@ -1670,6 +1783,39 @@ async function captureDom(src, settleMs, onNote){
   }
 }
 
+/* Fetch a SUBRESOURCE, repairing a CORS refusal through the relay.
+
+   This is not the same decision as the relay checkbox. That box says how to
+   fetch the page the user typed; this is about a font or an image the page
+   itself pulls from a CDN, which the user never chose and cannot see. Brand
+   typefaces are the common case: a foundry CDN serves the page's CSS with
+   `Access-Control-Allow-Origin` and the .woff2 beside it WITHOUT one, so the
+   face reads fine on screen and cannot be embedded — the export silently drops
+   to a system fallback, which on air is a wrong-looking graphic rather than an
+   obviously broken one.
+
+   Direct is always tried first (faster, and it is most of the time enough).
+   The relay is only ever a repair for something already lost, so a user who
+   left the box unticked still gets nothing routed that would have worked. */
+async function fetchAsset(url, opts){
+  const via = proxied(url);
+  const tries = via ? [via, url] : [url];
+  let last = null;
+  for (const u of tries) {
+    try { const r = await fetch(u, opts); if (r.ok) return r; last = r; } catch (e) { last = null; }
+  }
+  /* Nothing direct worked. If the relay was not already in the list, it is
+     worth one attempt — it reads the bytes server-side, where CORS does not
+     apply at all. */
+  if (!via && AG.RELAY) {
+    try {
+      const r = await fetch(AG.RELAY.replace(/\/?$/, '/') + url, opts);
+      if (r.ok) return r;
+    } catch (_) {}
+  }
+  return last;
+}
+
 /* ── images, inline SVG and canvases become data URIs the SVG can carry ── */
 /* `undo` makes this reversible. A one-shot capture throws its iframe away and
    does not care, but a LIVE instance keeps running after the grab — rewriting
@@ -1684,8 +1830,8 @@ async function inlineImages(doc, baseUrl, note, undo){
     if (/^data:/i.test(u)) return u;
     const url = abs(u); if (!url) return null;
     try {
-      const r = await fetch(proxied(url) || url, { mode:'cors', credentials:'omit', cache:'force-cache' });
-      if (!r.ok) return null;
+      const r = await fetchAsset(url, { mode:'cors', credentials:'omit', cache:'force-cache' });
+      if (!r || !r.ok) return null;
       const b = await r.arrayBuffer();
       if (b.byteLength > (cap || 8e6)) return null;
       return `data:${r.headers.get('content-type') || 'application/octet-stream'};base64,${b64(b)}`;
@@ -1728,22 +1874,42 @@ function fontFaceBlocks(cssText){
 /* Turn every url() in one @font-face block into a data: URI. Returns null if any
    of them cannot be fetched — a half-embedded face is worse than none, because
    the browser falls back silently and you only see it in the exported frame. */
+/* Turn the url()s in one @font-face into data: URIs.
+
+   An icon font's src list routinely ends with a legacy `.svg` entry that no
+   longer exists — Flowics' own CSS carries two that 404 on their own CDN. An
+   all-or-nothing rule therefore threw away a perfectly good woff2+ttf face
+   because of a dead fallback nobody has used since 2015, and reported the
+   typeface as lost. Keep what resolves, drop what does not, and only give up
+   when NOTHING in the face could be fetched. */
 async function embedFontUrls(css, base, note){
-  const urls = new Set();
-  css.replace(/url\(\s*["']?([^"')]+)["']?\s*\)/gi, (m, u) => { if (!/^data:/i.test(u)) urls.add(u); return m; });
+  const urls = [...new Set([...css.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/gi)]
+    .map(m => m[1]).filter(u => !/^data:/i.test(u)))];
+  if (!urls.length) return css;
+
+  let kept = 0, dropped = 0;
   for (const u of urls) {
     let full = null, d = null;
     try { full = new URL(u, base).href; } catch (_) {}
     if (full) {
       try {
-        const r = await fetch(proxied(full) || full, { mode:'cors', credentials:'omit', cache:'force-cache' });
-        if (r.ok) { const b = await r.arrayBuffer(); if (b.byteLength < 6e6) d = `data:font/woff2;base64,${b64(b)}`; }
+        const r = await fetchAsset(full, { mode:'cors', credentials:'omit', cache:'force-cache' });
+        if (r && r.ok) { const b = await r.arrayBuffer(); if (b.byteLength < 6e6) d = `data:font/woff2;base64,${b64(b)}`; }
       } catch (_) {}
     }
-    if (!d) { note('a webfont could not be embedded (CORS); that text falls back to a system face'); return null; }
-    css = css.split(u).join(d);
+    if (d) { css = css.split(u).join(d); kept++; }
+    else {
+      /* Cut just this source out of the list, commas and format() with it, so
+         the remaining sources still parse as valid CSS. */
+      css = css.replace(new RegExp('\\s*,?\\s*url\\(\\s*["\']?' +
+        u.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '["\']?\\s*\\)(\\s*format\\([^)]*\\))?', 'i'), '');
+      dropped++;
+    }
   }
-  return css;
+  if (!kept) { note('a webfont could not be embedded (CORS); that text falls back to a system face'); return null; }
+  if (dropped) note('a webfont had ' + dropped + ' unreachable source' + (dropped > 1 ? 's' : '') +
+                    ' dropped; the face itself was embedded');
+  return css.replace(/src\s*:\s*,/i, 'src:');
 }
 
 async function collectFontFaces(doc, baseUrl, note){
@@ -1762,8 +1928,8 @@ async function collectFontFaces(doc, baseUrl, note){
       let recovered = 0;
       if (via) {
         try {
-          const r = await fetch(via, { mode:'cors', credentials:'omit', cache:'no-store' });
-          if (r.ok) {
+          const r = await fetchAsset(href, { mode:'cors', credentials:'omit', cache:'no-store' });
+          if (r && r.ok) {
             for (const block of fontFaceBlocks(await r.text())) {
               const css = await embedFontUrls(block, href, note);
               if (css) { out += css + '\n'; recovered++; }
@@ -1801,6 +1967,126 @@ function domToSvg(doc, W, H, fontCss, note){
 
   const seen = new Set();
   const flag = (cond, msg) => { if (cond && !seen.has(msg)) { seen.add(msg); note(msg); } };
+
+  /* ── shadows and blurs ──────────────────────────────────────────────────
+     Broadcast text is legible over live video because it carries a shadow. A
+     repaint that drops the shadow does not give you "the same graphic, slightly
+     flatter" — it gives you one that reads as a mistake the moment it is keyed
+     over a bright background, which is the only place it is ever used.
+
+     Computed shadow values are always colour-first in Chromium
+     (`rgba(0, 0, 0, 0.5) 0px 4px 8px 2px`), with the spread term present for
+     box-shadow and absent for text-shadow. Top-level commas separate shadows;
+     the commas inside rgb() must not. */
+  const shadowList = (val, fallback) => {
+    if (!val || val === 'none') return [];
+    return val.split(/,(?![^(]*\))/).map(part => {
+      const raw = part.trim(); if (!raw) return null;
+      const cm = /rgba?\([^)]*\)/i.exec(raw);
+      const c = cssColor(cm ? cm[0] : fallback);
+      if (!c) return null;                    // fully transparent shadow: nothing to draw
+      const rest = (cm ? raw.replace(cm[0], ' ') : raw).replace(/\binset\b/ig, ' ');
+      const n = (rest.match(/-?[\d.]+/g) || []).map(Number);
+      if (n.length < 2) return null;
+      return { dx: n[0] || 0, dy: n[1] || 0, blur: Math.max(0, n[2] || 0),
+               spread: n[3] || 0, inset: /\binset\b/i.test(raw), color: c };
+    }).filter(Boolean);
+  };
+
+  /* How far the shadows reach past the element, so the filter region can be
+     sized exactly. A Gaussian is visually done by 3σ, and CSS defines its blur
+     radius as 2σ — hence blur × 1.5. Too small a region CLIPS the shadow into a
+     visible hard edge, which looks worse than having no shadow at all. */
+  const shadowRegion = (box, list) => {
+    let pad = 0;
+    for (const sh of list) pad = Math.max(pad,
+      Math.abs(sh.dx) + sh.blur * 1.5 + Math.abs(sh.spread),
+      Math.abs(sh.dy) + sh.blur * 1.5 + Math.abs(sh.spread));
+    pad = Math.ceil(pad) + 2;
+    return { x: box.left - pad, y: box.top - pad, w: box.width + pad * 2, h: box.height + pad * 2 };
+  };
+
+  /* feDropShadow would be one primitive per shadow, but it re-composites the
+     source into every result — chain two and the second blurs the first. So
+     each shadow is built by hand off SourceAlpha and they are merged once, in
+     reverse: CSS paints the FIRST shadow nearest the viewer. */
+  const filterCache = new Map();
+  const shadowFilter = (list, region, keepSource, extraPre) => {
+    if (!list.length && !extraPre) return null;
+    const steps = [], names = [];
+    list.forEach((sh, i) => {
+      const n = 's' + i;
+      let src = 'SourceAlpha';
+      if (sh.spread) {
+        steps.push('<feMorphology in="' + src + '" operator="' + (sh.spread > 0 ? 'dilate' : 'erode') +
+                   '" radius="' + round(Math.abs(sh.spread), 2) + '" result="' + n + 'm"/>');
+        src = n + 'm';
+      }
+      steps.push('<feGaussianBlur in="' + src + '" stdDeviation="' + round(sh.blur / 2, 3) + '" result="' + n + 'b"/>');
+      steps.push('<feOffset in="' + n + 'b" dx="' + round(sh.dx, 2) + '" dy="' + round(sh.dy, 2) + '" result="' + n + 'o"/>');
+      steps.push('<feFlood flood-color="' + sh.color.fill + '" flood-opacity="' + round(sh.color.opacity, 3) + '" result="' + n + 'f"/>');
+      steps.push('<feComposite in="' + n + 'f" in2="' + n + 'o" operator="in" result="' + n + '"/>');
+      names.push(n);
+    });
+    if (extraPre) steps.push(extraPre);
+    const top = extraPre ? 'blurred' : 'SourceGraphic';
+    if (names.length || keepSource)
+      steps.push('<feMerge>' + names.slice().reverse().map(n => '<feMergeNode in="' + n + '"/>').join('') +
+                 (keepSource ? '<feMergeNode in="' + top + '"/>' : '') + '</feMerge>');
+
+    /* Identical shadow over identical geometry is the norm, not the exception —
+       every line of a multi-line caption yields the same filter. Reuse it
+       instead of writing one <filter> per line into defs. */
+    const key = round(region.x,1) + '|' + round(region.y,1) + '|' + round(region.w,1) + '|' +
+                round(region.h,1) + '|' + steps.join('');
+    if (filterCache.has(key)) return filterCache.get(key);
+    const id = 'agf' + (gid++);
+    defs.push('<filter id="' + id + '" filterUnits="userSpaceOnUse" x="' + round(region.x,2) + '" y="' + round(region.y,2) +
+      '" width="' + round(region.w,2) + '" height="' + round(region.h,2) +
+      '" color-interpolation-filters="sRGB">' + steps.join('') + '</filter>');
+    filterCache.set(key, id);
+    return id;
+  };
+
+  /* CSS `filter` on an element applies to that element AND its subtree, so it
+     wraps the finished group rather than any single shape. Only the two that
+     actually turn up on graphics are repainted; the colour-matrix functions are
+     still reported rather than faked. */
+  /* `[^)]*` cannot read a filter function, because its argument contains its own
+     parentheses: drop-shadow(rgba(0,0,0,.9) 0 30px 8px) ends at the FIRST `)`,
+     which belongs to rgba. That mis-parse captured a truncated colour, produced
+     no shadow, and left the tail looking like an unsupported filter — so the
+     export lost the shadow AND reported the wrong reason. Count depth instead. */
+  const takeFn = (v, name) => {
+    const re = new RegExp(name.replace('-', '\\-') + '\\(', 'gi');
+    const args = []; let rest = '', i = 0;
+    while (i < v.length) {
+      re.lastIndex = i;
+      const m = re.exec(v);
+      if (!m) { rest += v.slice(i); break; }
+      rest += v.slice(i, m.index);
+      let depth = 1, j = m.index + m[0].length;
+      while (j < v.length && depth) { const ch = v[j++]; if (ch === '(') depth++; else if (ch === ')') depth--; }
+      args.push(v.slice(m.index + m[0].length, j - 1));
+      i = j;
+    }
+    return { args, rest: rest.trim() };
+  };
+
+  const cssFilterFor = (cs, box) => {
+    const v = cs.filter;
+    if (!v || v === 'none') return null;
+    const ds = takeFn(v, 'drop-shadow');
+    const bl = takeFn(ds.rest, 'blur');
+    const drops = [];
+    for (const a of ds.args) drops.push(...shadowList(a, cs.color));
+    const blur = bl.args.length ? Math.max(0, parseFloat(bl.args[0]) || 0) : 0;
+    flag(!!bl.rest, 'a CSS colour filter (brightness, saturate, hue-rotate…) was not repainted');
+    if (!drops.length && !blur) return null;
+    const region = shadowRegion(box, drops.concat(blur ? [{ dx: 0, dy: 0, blur: blur, spread: 0 }] : []));
+    const pre = blur ? '<feGaussianBlur in="SourceGraphic" stdDeviation="' + round(blur / 2, 3) + '" result="blurred"/>' : null;
+    return shadowFilter(drops, region, true, pre);
+  };
 
   /* linear-gradient(<angle|to side>, c1 [pos], c2 [pos], …) — the shape that
      actually turns up in lower thirds. Anything else is reported, not faked. */
@@ -1856,8 +2142,6 @@ function domToSvg(doc, W, H, fontCss, note){
     const r = node.getBoundingClientRect();
     const painted = r.width > 0.4 && r.height > 0.4;
 
-    flag(cs.boxShadow && cs.boxShadow !== 'none', 'box shadows are not repainted');
-    flag(cs.filter && cs.filter !== 'none', 'CSS filters are not repainted');
     flag(cs.mixBlendMode && cs.mixBlendMode !== 'normal', 'blend modes are not repainted');
     if (cs.transform && cs.transform !== 'none') {
       const mm = /matrix\(([^)]+)\)/.exec(cs.transform);
@@ -1869,6 +2153,19 @@ function domToSvg(doc, W, H, fontCss, note){
 
     const group = [];
     if (painted) {
+      /* The cast shadow goes down FIRST, as its own pass. This filter emits only
+         the shadows and not SourceGraphic, so the box itself then paints
+         normally on top instead of being blurred along with them. */
+      if (cs.boxShadow && cs.boxShadow !== 'none') {
+        const casts = shadowList(cs.boxShadow, cs.color);
+        const outset = casts.filter(sh => !sh.inset);
+        if (outset.length) {
+          const fid = shadowFilter(outset, shadowRegion(r, outset), false);
+          if (fid) group.push(boxRect(r, '#000', cs, ' filter="url(#' + fid + ')"'));
+        }
+        flag(casts.some(sh => sh.inset), 'an inset box shadow was not repainted');
+      }
+
       const bg = cssColor(cs.backgroundColor);
       if (bg) group.push(boxRect(r, bg.fill, cs, bg.opacity < 1 ? ` fill-opacity="${round(bg.opacity,3)}"` : ''));
 
@@ -1913,11 +2210,38 @@ function domToSvg(doc, W, H, fontCss, note){
       }
     }
 
-    const kids = [];
-    for (const child of Array.from(node.childNodes)) paint(child, kids);
+    /* Children are painted in STACKING order, not document order.
+
+       A broadcast template positions its plates and its text as siblings and
+       orders them with z-index; emitting in document order therefore painted
+       the backing bars OVER the text and erased it completely. Measured on a
+       live Flowics lower third: three <text> elements written correctly, then
+       five later <rect>s covering them — the export had the bars and no words
+       at all, which reads as "the graphic did not come through".
+
+       Sorting each parent's children by the z-index of positioned children,
+       stable by document order, is what CSS does inside a stacking context and
+       is enough for the layouts these graphics actually use. */
+    const kidParts = [];
+    Array.from(node.childNodes).forEach((child, idx) => {
+      const buf = [];
+      paint(child, buf);
+      if (!buf.length) return;
+      let z = 0;
+      if (child.nodeType === 1) {
+        const ccs = win.getComputedStyle(child);
+        if (ccs.position !== 'static' && ccs.zIndex !== 'auto') z = parseInt(ccs.zIndex, 10) || 0;
+      }
+      kidParts.push({ z, idx, html: buf.join('') });
+    });
+    kidParts.sort((a, b) => a.z - b.z || a.idx - b.idx);
+    const kids = kidParts.map(e => e.html);
     const all = group.concat(kids).join('');
     if (!all) return;
-    out.push(alpha < 1 ? `<g opacity="${round(alpha,3)}">${all}</g>` : all);
+    const fid = cssFilterFor(cs, r);
+    const attrs = (alpha < 1 ? ' opacity="' + round(alpha, 3) + '"' : '') +
+                  (fid ? ' filter="url(#' + fid + ')"' : '');
+    out.push(attrs ? '<g' + attrs + '>' + all + '</g>' : all);
   }
 
   /* Text is emitted line by line, positioned from the browser's own line boxes,
@@ -1939,15 +2263,24 @@ function domToSvg(doc, W, H, fontCss, note){
       range.setStart(node, i); range.setEnd(node, i + 1);
       const cr = range.getBoundingClientRect();
       if (!cr.width && !cr.height) continue;                 // collapsed whitespace
-      if (!cur || Math.abs(cr.top - cur.top) > 1.5) { cur = { top: cr.top, bottom: cr.bottom, left: cr.left, text: raw[i] }; lines.push(cur); }
-      else { cur.text += raw[i]; cur.bottom = Math.max(cur.bottom, cr.bottom); cur.left = Math.min(cur.left, cr.left); }
+      if (!cur || Math.abs(cr.top - cur.top) > 1.5) { cur = { top: cr.top, bottom: cr.bottom, left: cr.left, right: cr.right, text: raw[i] }; lines.push(cur); }
+      else { cur.text += raw[i]; cur.bottom = Math.max(cur.bottom, cr.bottom); cur.left = Math.min(cur.left, cr.left); cur.right = Math.max(cur.right, cr.right); }
     }
 
     const deco = cs.textDecorationLine || '';
+    /* Inset is meaningless on text, so anything the parser reports as inset is
+       a malformed value rather than a feature to warn about — drop it. */
+    const shad = shadowList(cs.textShadow, cs.color).filter(sh => !sh.inset);
     for (const ln of lines) {
       const t = ln.text.replace(/\s+$/, '');
       if (!t.trim()) continue;
+      /* Per LINE, not per text node: the region is sized off this line's own box,
+         and identical lines share one cached <filter>. */
+      const fid = shad.length ? shadowFilter(shad, shadowRegion(
+        { left: ln.left, top: ln.top, width: Math.max(1, ln.right - ln.left), height: Math.max(1, ln.bottom - ln.top) },
+        shad), true) : null;
       out.push(`<text x="${round(ln.left,2)}" y="${round((ln.top + ln.bottom) / 2,2)}" dominant-baseline="central"` +
+        (fid ? ` filter="url(#${fid})"` : '') +
         ` font-family="${XESC(cs.fontFamily)}" font-size="${round(size,2)}px"` +
         (cs.fontWeight && cs.fontWeight !== '400' ? ` font-weight="${XESC(cs.fontWeight)}"` : '') +
         (cs.fontStyle && cs.fontStyle !== 'normal' ? ` font-style="${XESC(cs.fontStyle)}"` : '') +
@@ -1956,7 +2289,6 @@ function domToSvg(doc, W, H, fontCss, note){
         ` fill="${col.fill}"${col.opacity < 1 ? ` fill-opacity="${round(col.opacity,3)}"` : ''}` +
         ` xml:space="preserve">${XESC(t)}</text>`);
     }
-    flag(cs.textShadow && cs.textShadow !== 'none', 'text shadows are not repainted');
   }
 
   /* The page's own ground paints only if it is opaque; a template meant for a
@@ -1967,7 +2299,20 @@ function domToSvg(doc, W, H, fontCss, note){
       if (c) body.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="${c.fill}"` +
         (c.opacity < 1 ? ` fill-opacity="${round(c.opacity,3)}"` : '') + `/>`);
     }
-    for (const child of Array.from(doc.body.childNodes)) paint(child, body);
+    const topParts = [];
+    Array.from(doc.body.childNodes).forEach((child, idx) => {
+      const buf = [];
+      paint(child, buf);
+      if (!buf.length) return;
+      let z = 0;
+      if (child.nodeType === 1) {
+        const ccs = win.getComputedStyle(child);
+        if (ccs.position !== 'static' && ccs.zIndex !== 'auto') z = parseInt(ccs.zIndex, 10) || 0;
+      }
+      topParts.push({ z, idx, html: buf.join('') });
+    });
+    topParts.sort((a, b) => a.z - b.z || a.idx - b.idx);
+    topParts.forEach(e => body.push(e.html));
   }
 
   return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
@@ -2848,6 +3193,13 @@ const DEMOS = {
 /* ═══════════════════════════ boot ═══════════════════════════ */
 function boot(){
   loadOpts();
+  /* Simple mode is the product. Anyone carrying a saved `full` from an earlier
+     version is moved across once — after that the toggle is theirs again. */
+  try {
+    if (!localStorage.getItem('alphagrab.simple.v1')) {
+      S.opts.ui = 'simple'; localStorage.setItem('alphagrab.simple.v1', '1'); saveOpts();
+    }
+  } catch (_) { S.opts.ui = S.opts.ui || 'simple'; }
   PROBED = probeCanvasCeiling();
   CEILING = Math.min(PROBED, AG.MAX_DIM);
   const cv = $('#ceilVal');
@@ -2864,6 +3216,7 @@ function boot(){
   bindLive();
   bindSimple();
   bindIntro();
+  bindSaveDir();
   /* The only JS the rotate prompt needs: a way out for anyone who genuinely
      wants it upright. Whether it SHOWS is CSS's decision, so it can never
      disagree with the actual orientation. */
@@ -3197,7 +3550,17 @@ async function doRun(reraster){
     try {
       await raf();
       const opts = Object.assign({}, S.opts, { _refW: full.w });
-      S.rawPreview = await rasterise(S.source, pv.w, pv.h, opts, n => toast('Heads up', n, 'err', 12000));
+      /* ONE card, not one per note. A template with a cross-origin font and a
+         cross-origin background image reported three separate red boxes that
+         stacked over the Download button in the corner — the operator's single
+         most important control, hidden by advisories about things that did not
+         stop the export. Gather them and say it once. */
+      const notes = [];
+      S.rawPreview = await rasterise(S.source, pv.w, pv.h, opts, n => notes.push(n));
+      if (notes.length) toast(
+        notes.length === 1 ? 'Heads up' : `Heads up · ${notes.length} things to know`,
+        notes.length === 1 ? notes[0] : '<ul>' + notes.map(n => `<li>${n}</li>`).join('') + '</ul>',
+        'warn', 12000);
     } finally { if (done) done(); }
     if (token !== runToken) return;
   }
@@ -3463,7 +3826,7 @@ async function exportFrame(){
     const d = await fullFrame();
     const { blob, fmt } = await encodeFrame(d, S.opts.format, S.opts);
     const fn = nameFor(d, fmt.ext);
-    saveBlob(blob, fn);
+    saveBlob(blob, fn, { dir: await saveDirReady(true) });
     toast('Saved', `<code>${fn}</code> · ${d.width} × ${d.height} · ${bytes(blob.size)}`, 'ok');
   } finally { done(); }
 }
@@ -3479,9 +3842,10 @@ async function exportFillKey(){
       { d: makeFill(d, 'overBlack', S.opts.matteColor), key: 'fill' },
       { d: makeKey(d), key: 'key' }
     ];
+    const dir = await saveDirReady(true);
     for (const p of pair) {
       const { blob, fmt: f } = await encodeFrame(p.d, useFmt, S.opts);
-      saveBlob(blob, nameFor(p.d, f.ext, { key: p.key, name: S.source.name + '_' + p.key }));
+      await saveBlob(blob, nameFor(p.d, f.ext, { key: p.key, name: S.source.name + '_' + p.key }), { dir });
     }
     toast('Saved the pair', `Fill and key at ${d.width} × ${d.height}. The fill is composited over black — that is what a downstream keyer expects.`, 'ok');
   } finally { done(); }
@@ -3526,7 +3890,7 @@ async function runBatch(){
     const seen = new Set();
     files.forEach(f => { let n = f.name, i = 2; while (seen.has(n)) n = f.name.replace(/(\.[^.]+)$/, `-${i++}$1`); seen.add(n); f.name = n; });
     const zip = await makeZip(files);
-    saveBlob(zip, `alphagrab-batch-${files.length}.zip`);
+    await saveBlob(zip, `alphagrab-batch-${files.length}.zip`, { dir: await saveDirReady(true) });
     toast(failed ? 'Batch finished with failures' : 'Batch finished',
       `${files.length} frame${files.length > 1 ? 's' : ''} zipped${failed ? `, ${failed} failed — see the queue` : ''}. ${bytes(zip.size)}`, failed ? 'err' : 'ok');
   } finally { done(); }
@@ -3779,8 +4143,22 @@ function syncLiveView(){
 function fitTile(inst){
   if (!inst.frame || !inst.frame.parentElement) return;
   const view = inst.frame.parentElement;
-  const w = view.clientWidth || 320;
-  const s = w / inst.w;
+  const solo = $('#mv') && $('#mv').classList.contains('solo');
+  let s;
+  if (solo) {
+    /* CONTAIN, both axes. Scaling by width alone put a 16:9 frame's bottom
+       below the fold on any short window — the picture was simply cut off, and
+       the part you lose is the lower third, which is where the graphic is.
+       Fit to whichever axis runs out first and centre what is left. */
+    const box = view.closest('.mv').getBoundingClientRect();
+    const availW = Math.max(80, box.width  - 28);
+    const availH = Math.max(80, box.height - 28);
+    s = Math.min(availW / inst.w, availH / inst.h);
+    view.style.width = Math.round(inst.w * s) + 'px';
+  } else {
+    s = (view.clientWidth || 320) / inst.w;
+    view.style.width = '';
+  }
   inst.frame.style.transform = `scale(${s})`;
   view.style.height = Math.round(inst.h * s) + 'px';
 }
@@ -4006,6 +4384,37 @@ async function refreshSource(announce){
   return same;
 }
 
+/* Label the control with the folder itself. "Downloads" tells the operator
+   where the clips are going; "Save to…" tells them nothing is set yet. */
+function syncSaveDir(){
+  const b = $('#sbFolder');
+  if (!b) return;
+  if (!canPickFolder()) { b.hidden = true; return; }
+  b.hidden = false;
+  b.textContent = saveDir ? saveDir.name : 'Save to…';
+  b.classList.toggle('on', !!saveDir);
+  b.title = saveDir
+    ? `Clips save straight into "${saveDir.name}" with no dialog. Click to change folder.`
+    : 'Choose a folder once and every clip saves straight into it, with no save dialog.';
+}
+
+async function bindSaveDir(){
+  const b = $('#sbFolder');
+  if (!b) return;
+  await loadSaveDir();
+  syncSaveDir();
+  on(b, 'click', async () => {
+    try { await pickSaveDir(); syncSaveDir();
+      toast('Folder set', `Clips now save straight into <b>${XESC(saveDir.name)}</b> — no dialog, no prompt.`, 'ok');
+    }
+    /* AbortError is the operator closing the dialog. SecurityError and
+       NotAllowedError mean the call did not arrive on a user gesture — which
+       a synthetic click does not, so automation trips it every run. None of
+       the three is a fault worth a dialog. */
+    catch (e) { if (e && !/^(AbortError|SecurityError|NotAllowedError)$/.test(e.name)) showError(e); }
+  });
+}
+
 async function downloadClip(){
   if (!S.source) throw new AGError('Nothing to download', 'Grab a URL or open a file first.');
   const btn = $('#sbDownload');
@@ -4019,7 +4428,8 @@ async function downloadClip(){
     const d = await fullFrame();
     const { blob, fmt } = await encodeFrame(d, S.opts.format, S.opts);
     const fn = clipName(fmt.ext, d);
-    saveBlob(blob, fn);
+    const saved = await saveBlob(blob, fn, { dir: await saveDirReady(true) });
+    syncSaveDir();
 
     const was = S.opts.seq;
     S.opts.seq = Math.min(AG.SEQ_MAX, (S.opts.seq | 0) + 1);
@@ -4055,7 +4465,8 @@ async function downloadClip(){
         `Push the next graphic to the URL, then download again.`, 'warn', 7000);
     } else {
       const a = S.stats && S.stats.clearRatio != null ? ` · ${(S.stats.clearRatio * 100).toFixed(0)}% clear` : '';
-      toast('Saved', `<code>${fn}</code> · ${d.width} × ${d.height} · ${bytes(blob.size)}${a}`, 'ok');
+      const w = saved && saved.how === 'folder' ? ` · <b>${XESC(saved.where)}</b>` : '';
+      toast('Saved', `<code>${fn}</code> · ${d.width} × ${d.height} · ${bytes(blob.size)}${a}${w}`, 'ok');
     }
   } finally { done(); btn.disabled = !S.source; }
 }

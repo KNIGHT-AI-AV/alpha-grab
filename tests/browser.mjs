@@ -341,7 +341,75 @@ const notes = await page.evaluate(async () => {
   await captureDom(src, 60, n => seen.push(n));
   return seen;
 });
-is(notes.some(n => /box shadow/i.test(n)), `an unsupported box-shadow is reported: "${notes.find(n => /box shadow/i.test(n)) || '—'}"`);
+/* Box shadows USED to be reported as unsupported. They are repainted now, so
+   the note is gone by design — the assertion that replaced it checks the thing
+   that actually matters, which is that the shadow reaches the pixels. */
+is(!notes.some(n => /box shadow/i.test(n) && !/inset/i.test(n)),
+   `an outset box-shadow no longer reports as unsupported: "${notes.find(n => /box shadow/i.test(n)) || '—'}"`);
+
+group('shadows survive the repaint');
+/* The strips sampled below sit OUTSIDE every element's own box, so the only
+   thing that can darken them is a shadow. This is the regression guard for
+   "the downloaded file did not show the text": a repaint that silently drops
+   what makes broadcast text legible is not a correct repaint. */
+const shadowPx = await page.evaluate(async () => {
+  const html = '<body style="margin:0;width:600px;height:400px">' +
+    '<div style="position:absolute;left:60px;top:60px;width:300px;height:80px;background:#c8102e;' +
+      'box-shadow:rgba(0,0,0,0.9) 0px 30px 10px 4px"></div>' +
+    '<div style="position:absolute;left:60px;top:220px;font:700 44px/1 Arial,sans-serif;color:#fff;' +
+      'text-shadow:rgba(0,0,0,0.95) 0px 26px 5px">ON AIR</div>' +
+    '<div style="position:absolute;left:430px;top:60px;width:90px;height:80px;background:#0f8;' +
+      'filter:drop-shadow(rgba(0,0,0,0.9) 0px 30px 8px)"></div></body>';
+  const src = await loadFromUrl('data:text/html,' + encodeURIComponent(html));
+  src.w = 600; src.h = 400;
+  const svg = await captureDom(src, 60, () => {});
+  const img = new Image();
+  await new Promise((res, rej) => { img.onload = res; img.onerror = rej;
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); });
+  const c = document.createElement('canvas'); c.width = 600; c.height = 400;
+  c.getContext('2d').drawImage(img, 0, 0);
+  const d = c.getContext('2d').getImageData(0, 0, 600, 400);
+  const count = (x0, y0, w, h) => {
+    let n = 0;
+    for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) {
+      const i = (y * 600 + x) * 4;
+      if (d.data[i + 3] > 40 && d.data[i] < 120 && d.data[i + 1] < 120 && d.data[i + 2] < 120) n++;
+    }
+    return n;
+  };
+  return { box: count(80, 152, 260, 24), text: count(65, 268, 200, 18),
+           drop: count(435, 152, 80, 24), filters: (svg.match(/<filter /g) || []).length };
+});
+is(shadowPx.box  > 400, `a box-shadow lands below its box: ${shadowPx.box} px`);
+is(shadowPx.text > 200, `a text-shadow lands below the glyphs: ${shadowPx.text} px`);
+is(shadowPx.drop > 200, `a CSS filter drop-shadow lands below its box: ${shadowPx.drop} px`);
+is(shadowPx.filters === 3, `one <filter> per shadowed element, not per line: ${shadowPx.filters}`);
+
+group('a plate behind the text does not paint over it');
+/* The bug this guards: a template orders plate and caption by z-index, with the
+   plate written LATER in the DOM. Emitting in document order painted the plate
+   last, so it covered every word and the export came back with bars and no
+   text — valid, correctly sized, and unusable. */
+const stack = await page.evaluate(async () => {
+  const html = '<body style="margin:0;width:600px;height:200px">' +
+    '<div style="position:absolute;z-index:9;left:40px;top:60px;font:700 60px/1 Arial,sans-serif;' +
+      'color:#000">HEADLINE</div>' +
+    '<div style="position:absolute;z-index:1;left:20px;top:40px;width:560px;height:120px;' +
+      'background:#fff"></div></body>';
+  const src = await loadFromUrl('data:text/html,' + encodeURIComponent(html));
+  src.w = 600; src.h = 200;
+  const svg = await captureDom(src, 60, () => {});
+  const img = new Image();
+  await new Promise((res, rej) => { img.onload = res; img.onerror = rej;
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); });
+  const c = document.createElement('canvas'); c.width = 600; c.height = 200;
+  c.getContext('2d').drawImage(img, 0, 0);
+  const d = c.getContext('2d').getImageData(0, 0, 600, 200).data;
+  let ink = 0;
+  for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 40 && d[i] < 90) ink++;
+  return ink;
+});
+is(stack > 1500, `the higher z-index caption survives a later, lower plate: ${stack} dark px`);
 is(notes.some(n => /transform/i.test(n)), `a rotate transform is reported: "${notes.find(n => /transform/i.test(n)) || '—'}"`);
 
 group('bad input fails loudly, not silently');

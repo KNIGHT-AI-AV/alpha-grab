@@ -187,11 +187,101 @@ function busy(msg){
 const raf = () => new Promise(r => requestAnimationFrame(() => r()));
 
 /* ─────────────────────────── download ─────────────────────────── */
-function saveBlob(blob, filename){
+/* ─────────────────── where the clips land ───────────────────
+   The point of this tool is a LOOP: push a graphic, download, push the next,
+   download. A Save-As dialog on every pass turns a four-second loop into a
+   twenty-second one, and the operator is doing it live.
+
+   `showDirectoryPicker` fixes it properly — the folder is chosen ONCE and every
+   later write goes straight in with no dialog at all. The handle survives a
+   reload because it is structured-cloneable and can sit in IndexedDB; what does
+   NOT survive is the permission, so it is re-requested on the next download
+   click, which is a user gesture and therefore allowed to ask.
+
+   Chromium only. Firefox and Safari have no equivalent and cannot be given one,
+   so the control hides itself there and the ordinary download path stands. */
+const FS_DB = 'alphagrab', FS_STORE = 'handles', FS_KEY = 'saveDir';
+
+function idb(){
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(FS_DB, 1);
+    r.onupgradeneeded = () => { try { r.result.createObjectStore(FS_STORE); } catch (_) {} };
+    r.onsuccess = () => res(r.result);
+    r.onerror   = () => rej(r.error);
+  });
+}
+async function idbGet(key){
+  try {
+    const db = await idb();
+    return await new Promise((res, rej) => {
+      const q = db.transaction(FS_STORE, 'readonly').objectStore(FS_STORE).get(key);
+      q.onsuccess = () => res(q.result || null); q.onerror = () => rej(q.error);
+    });
+  } catch (_) { return null; }
+}
+async function idbSet(key, val){
+  try {
+    const db = await idb();
+    await new Promise((res, rej) => {
+      const t = db.transaction(FS_STORE, 'readwrite');
+      if (val === null) t.objectStore(FS_STORE).delete(key); else t.objectStore(FS_STORE).put(val, key);
+      t.oncomplete = () => res(); t.onerror = () => rej(t.error);
+    });
+    return true;
+  } catch (_) { return false; }
+}
+
+const canPickFolder = () => typeof window.showDirectoryPicker === 'function' && window.isSecureContext;
+
+let saveDir = null;                       // FileSystemDirectoryHandle or null
+
+async function loadSaveDir(){
+  if (!canPickFolder()) return null;
+  saveDir = await idbGet(FS_KEY);
+  return saveDir;
+}
+
+/* Ask once. `startIn:'downloads'` opens where they would have saved anyway. */
+async function pickSaveDir(){
+  const h = await window.showDirectoryPicker({ id: 'alphagrab-clips', mode: 'readwrite', startIn: 'downloads' });
+  saveDir = h;
+  await idbSet(FS_KEY, h);
+  return h;
+}
+async function forgetSaveDir(){ saveDir = null; await idbSet(FS_KEY, null); }
+
+/* 'granted' now, 'granted' after asking, or null. Only ever call this from
+   inside a click — outside a user gesture requestPermission rejects. */
+async function saveDirReady(ask){
+  if (!saveDir || !saveDir.queryPermission) return null;
+  try {
+    if (await saveDir.queryPermission({ mode: 'readwrite' }) === 'granted') return saveDir;
+    if (!ask) return null;
+    if (await saveDir.requestPermission({ mode: 'readwrite' }) === 'granted') return saveDir;
+  } catch (_) {}
+  return null;
+}
+
+/* Returns how it was saved, so the caller can say where the file went rather
+   than leaving the operator hunting for it. */
+async function saveBlob(blob, filename, opts){
+  const dir = (opts && opts.dir) || null;
+  if (dir) {
+    try {
+      const fh = await dir.getFileHandle(filename, { create: true });
+      const w  = await fh.createWritable();
+      await w.write(blob); await w.close();
+      return { how: 'folder', where: dir.name || 'the chosen folder' };
+    } catch (e) {
+      /* Fall through to the browser's own download rather than losing the
+         frame — a revoked folder permission must not cost a live grab. */
+    }
+  }
   const url = URL.createObjectURL(blob);
   const a = el('a', { href: url, download: filename });
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return { how: 'download', where: null };
 }
 
 /* ───────────────────── real canvas ceiling probe ─────────────────────

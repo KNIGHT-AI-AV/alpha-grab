@@ -255,7 +255,7 @@ body.dragging .dropzone{display:flex}
 .qrow .x:hover{color:var(--red)}
 
 /* ───────────────────────── toast / status ───────────────────────── */
-#toasts{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:200;max-width:min(430px,calc(100vw - 32px))}
+#toasts{position:fixed;right:16px;bottom:16px;pointer-events:none;display:flex;flex-direction:column;gap:8px;z-index:200;max-width:min(430px,calc(100vw - 32px))}
 .toast{
   background:var(--panel-2);border:1px solid var(--line);border-left:3px solid var(--gold);
   border-radius:var(--radius-sm);padding:10px 13px;box-shadow:var(--shadow);font-size:13px;
@@ -501,7 +501,7 @@ body:not(.has-source) #pan{display:none}
    browser, so the instance never moves — the multiviewer simply goes solo. */
 body.simple #mv.solo{padding:14px;gap:0}
 body.simple #mv.solo .mv-grid{grid-template-columns:minmax(0,1fr);place-items:center;height:100%}
-body.simple #mv.solo .inst{border:0;background:none;width:100%;max-width:100%}
+body.simple #mv.solo .inst{border:0;background:none;width:auto;max-width:100%;margin:auto}
 body.simple #mv.solo .inst.sel{box-shadow:none}
 body.simple #mv.solo .inst-head{display:none}
 body.simple #mv.solo .inst-view{cursor:default;border-radius:var(--radius)}
@@ -523,3 +523,25 @@ body.feed #pan{display:none}
 body.feed #empty{display:none!important}
 /* Parked, not removed: out of sight, still laid out, still capturable. */
 body.simple #mv.solo .inst.parked{position:absolute;left:-99999px;top:0;width:640px}
+
+/* Solo: the picture is centred in whatever room the stage has, both axes. */
+body.simple #mv.solo{display:grid;place-items:center;overflow:hidden;padding:14px}
+/* align-content:center too — the base grid rule sets `start`, which pins the
+   picture to the top of a tall window instead of centring it in the room. */
+body.simple #mv.solo .mv-grid{display:grid;place-items:center;align-content:center;
+  justify-content:center;width:100%;height:100%;grid-template-columns:minmax(0,auto)}
+
+/* The remembered save folder. `.on` is the state that matters — it is the
+   difference between a dialog on every clip and none at all. */
+#sbFolder{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#sbFolder.on{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+#sbFolder.on::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;
+  background:var(--ok);margin-right:6px;vertical-align:middle}
+
+/* Toasts clear the simple bar instead of covering it. The bar holds Download —
+   a notice that hides the only control the operator needs is worse than no
+   notice, and it was doing exactly that with three stacked cards. */
+body.simple #toasts{bottom:calc(var(--simple-bar-h, 58px) + 14px)}
+#toasts>*{pointer-events:auto}
+.toast ul{margin:5px 0 0;padding-left:17px;display:flex;flex-direction:column;gap:3px}
+.toast li{line-height:1.45}

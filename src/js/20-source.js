@@ -263,6 +263,39 @@ async function captureDom(src, settleMs, onNote){
   }
 }
 
+/* Fetch a SUBRESOURCE, repairing a CORS refusal through the relay.
+
+   This is not the same decision as the relay checkbox. That box says how to
+   fetch the page the user typed; this is about a font or an image the page
+   itself pulls from a CDN, which the user never chose and cannot see. Brand
+   typefaces are the common case: a foundry CDN serves the page's CSS with
+   `Access-Control-Allow-Origin` and the .woff2 beside it WITHOUT one, so the
+   face reads fine on screen and cannot be embedded — the export silently drops
+   to a system fallback, which on air is a wrong-looking graphic rather than an
+   obviously broken one.
+
+   Direct is always tried first (faster, and it is most of the time enough).
+   The relay is only ever a repair for something already lost, so a user who
+   left the box unticked still gets nothing routed that would have worked. */
+async function fetchAsset(url, opts){
+  const via = proxied(url);
+  const tries = via ? [via, url] : [url];
+  let last = null;
+  for (const u of tries) {
+    try { const r = await fetch(u, opts); if (r.ok) return r; last = r; } catch (e) { last = null; }
+  }
+  /* Nothing direct worked. If the relay was not already in the list, it is
+     worth one attempt — it reads the bytes server-side, where CORS does not
+     apply at all. */
+  if (!via && AG.RELAY) {
+    try {
+      const r = await fetch(AG.RELAY.replace(/\/?$/, '/') + url, opts);
+      if (r.ok) return r;
+    } catch (_) {}
+  }
+  return last;
+}
+
 /* ── images, inline SVG and canvases become data URIs the SVG can carry ── */
 /* `undo` makes this reversible. A one-shot capture throws its iframe away and
    does not care, but a LIVE instance keeps running after the grab — rewriting
@@ -277,8 +310,8 @@ async function inlineImages(doc, baseUrl, note, undo){
     if (/^data:/i.test(u)) return u;
     const url = abs(u); if (!url) return null;
     try {
-      const r = await fetch(proxied(url) || url, { mode:'cors', credentials:'omit', cache:'force-cache' });
-      if (!r.ok) return null;
+      const r = await fetchAsset(url, { mode:'cors', credentials:'omit', cache:'force-cache' });
+      if (!r || !r.ok) return null;
       const b = await r.arrayBuffer();
       if (b.byteLength > (cap || 8e6)) return null;
       return `data:${r.headers.get('content-type') || 'application/octet-stream'};base64,${b64(b)}`;
@@ -321,22 +354,42 @@ function fontFaceBlocks(cssText){
 /* Turn every url() in one @font-face block into a data: URI. Returns null if any
    of them cannot be fetched — a half-embedded face is worse than none, because
    the browser falls back silently and you only see it in the exported frame. */
+/* Turn the url()s in one @font-face into data: URIs.
+
+   An icon font's src list routinely ends with a legacy `.svg` entry that no
+   longer exists — Flowics' own CSS carries two that 404 on their own CDN. An
+   all-or-nothing rule therefore threw away a perfectly good woff2+ttf face
+   because of a dead fallback nobody has used since 2015, and reported the
+   typeface as lost. Keep what resolves, drop what does not, and only give up
+   when NOTHING in the face could be fetched. */
 async function embedFontUrls(css, base, note){
-  const urls = new Set();
-  css.replace(/url\(\s*["']?([^"')]+)["']?\s*\)/gi, (m, u) => { if (!/^data:/i.test(u)) urls.add(u); return m; });
+  const urls = [...new Set([...css.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/gi)]
+    .map(m => m[1]).filter(u => !/^data:/i.test(u)))];
+  if (!urls.length) return css;
+
+  let kept = 0, dropped = 0;
   for (const u of urls) {
     let full = null, d = null;
     try { full = new URL(u, base).href; } catch (_) {}
     if (full) {
       try {
-        const r = await fetch(proxied(full) || full, { mode:'cors', credentials:'omit', cache:'force-cache' });
-        if (r.ok) { const b = await r.arrayBuffer(); if (b.byteLength < 6e6) d = `data:font/woff2;base64,${b64(b)}`; }
+        const r = await fetchAsset(full, { mode:'cors', credentials:'omit', cache:'force-cache' });
+        if (r && r.ok) { const b = await r.arrayBuffer(); if (b.byteLength < 6e6) d = `data:font/woff2;base64,${b64(b)}`; }
       } catch (_) {}
     }
-    if (!d) { note('a webfont could not be embedded (CORS); that text falls back to a system face'); return null; }
-    css = css.split(u).join(d);
+    if (d) { css = css.split(u).join(d); kept++; }
+    else {
+      /* Cut just this source out of the list, commas and format() with it, so
+         the remaining sources still parse as valid CSS. */
+      css = css.replace(new RegExp('\\s*,?\\s*url\\(\\s*["\']?' +
+        u.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '["\']?\\s*\\)(\\s*format\\([^)]*\\))?', 'i'), '');
+      dropped++;
+    }
   }
-  return css;
+  if (!kept) { note('a webfont could not be embedded (CORS); that text falls back to a system face'); return null; }
+  if (dropped) note('a webfont had ' + dropped + ' unreachable source' + (dropped > 1 ? 's' : '') +
+                    ' dropped; the face itself was embedded');
+  return css.replace(/src\s*:\s*,/i, 'src:');
 }
 
 async function collectFontFaces(doc, baseUrl, note){
@@ -355,8 +408,8 @@ async function collectFontFaces(doc, baseUrl, note){
       let recovered = 0;
       if (via) {
         try {
-          const r = await fetch(via, { mode:'cors', credentials:'omit', cache:'no-store' });
-          if (r.ok) {
+          const r = await fetchAsset(href, { mode:'cors', credentials:'omit', cache:'no-store' });
+          if (r && r.ok) {
             for (const block of fontFaceBlocks(await r.text())) {
               const css = await embedFontUrls(block, href, note);
               if (css) { out += css + '\n'; recovered++; }
@@ -394,6 +447,126 @@ function domToSvg(doc, W, H, fontCss, note){
 
   const seen = new Set();
   const flag = (cond, msg) => { if (cond && !seen.has(msg)) { seen.add(msg); note(msg); } };
+
+  /* ── shadows and blurs ──────────────────────────────────────────────────
+     Broadcast text is legible over live video because it carries a shadow. A
+     repaint that drops the shadow does not give you "the same graphic, slightly
+     flatter" — it gives you one that reads as a mistake the moment it is keyed
+     over a bright background, which is the only place it is ever used.
+
+     Computed shadow values are always colour-first in Chromium
+     (`rgba(0, 0, 0, 0.5) 0px 4px 8px 2px`), with the spread term present for
+     box-shadow and absent for text-shadow. Top-level commas separate shadows;
+     the commas inside rgb() must not. */
+  const shadowList = (val, fallback) => {
+    if (!val || val === 'none') return [];
+    return val.split(/,(?![^(]*\))/).map(part => {
+      const raw = part.trim(); if (!raw) return null;
+      const cm = /rgba?\([^)]*\)/i.exec(raw);
+      const c = cssColor(cm ? cm[0] : fallback);
+      if (!c) return null;                    // fully transparent shadow: nothing to draw
+      const rest = (cm ? raw.replace(cm[0], ' ') : raw).replace(/\binset\b/ig, ' ');
+      const n = (rest.match(/-?[\d.]+/g) || []).map(Number);
+      if (n.length < 2) return null;
+      return { dx: n[0] || 0, dy: n[1] || 0, blur: Math.max(0, n[2] || 0),
+               spread: n[3] || 0, inset: /\binset\b/i.test(raw), color: c };
+    }).filter(Boolean);
+  };
+
+  /* How far the shadows reach past the element, so the filter region can be
+     sized exactly. A Gaussian is visually done by 3σ, and CSS defines its blur
+     radius as 2σ — hence blur × 1.5. Too small a region CLIPS the shadow into a
+     visible hard edge, which looks worse than having no shadow at all. */
+  const shadowRegion = (box, list) => {
+    let pad = 0;
+    for (const sh of list) pad = Math.max(pad,
+      Math.abs(sh.dx) + sh.blur * 1.5 + Math.abs(sh.spread),
+      Math.abs(sh.dy) + sh.blur * 1.5 + Math.abs(sh.spread));
+    pad = Math.ceil(pad) + 2;
+    return { x: box.left - pad, y: box.top - pad, w: box.width + pad * 2, h: box.height + pad * 2 };
+  };
+
+  /* feDropShadow would be one primitive per shadow, but it re-composites the
+     source into every result — chain two and the second blurs the first. So
+     each shadow is built by hand off SourceAlpha and they are merged once, in
+     reverse: CSS paints the FIRST shadow nearest the viewer. */
+  const filterCache = new Map();
+  const shadowFilter = (list, region, keepSource, extraPre) => {
+    if (!list.length && !extraPre) return null;
+    const steps = [], names = [];
+    list.forEach((sh, i) => {
+      const n = 's' + i;
+      let src = 'SourceAlpha';
+      if (sh.spread) {
+        steps.push('<feMorphology in="' + src + '" operator="' + (sh.spread > 0 ? 'dilate' : 'erode') +
+                   '" radius="' + round(Math.abs(sh.spread), 2) + '" result="' + n + 'm"/>');
+        src = n + 'm';
+      }
+      steps.push('<feGaussianBlur in="' + src + '" stdDeviation="' + round(sh.blur / 2, 3) + '" result="' + n + 'b"/>');
+      steps.push('<feOffset in="' + n + 'b" dx="' + round(sh.dx, 2) + '" dy="' + round(sh.dy, 2) + '" result="' + n + 'o"/>');
+      steps.push('<feFlood flood-color="' + sh.color.fill + '" flood-opacity="' + round(sh.color.opacity, 3) + '" result="' + n + 'f"/>');
+      steps.push('<feComposite in="' + n + 'f" in2="' + n + 'o" operator="in" result="' + n + '"/>');
+      names.push(n);
+    });
+    if (extraPre) steps.push(extraPre);
+    const top = extraPre ? 'blurred' : 'SourceGraphic';
+    if (names.length || keepSource)
+      steps.push('<feMerge>' + names.slice().reverse().map(n => '<feMergeNode in="' + n + '"/>').join('') +
+                 (keepSource ? '<feMergeNode in="' + top + '"/>' : '') + '</feMerge>');
+
+    /* Identical shadow over identical geometry is the norm, not the exception —
+       every line of a multi-line caption yields the same filter. Reuse it
+       instead of writing one <filter> per line into defs. */
+    const key = round(region.x,1) + '|' + round(region.y,1) + '|' + round(region.w,1) + '|' +
+                round(region.h,1) + '|' + steps.join('');
+    if (filterCache.has(key)) return filterCache.get(key);
+    const id = 'agf' + (gid++);
+    defs.push('<filter id="' + id + '" filterUnits="userSpaceOnUse" x="' + round(region.x,2) + '" y="' + round(region.y,2) +
+      '" width="' + round(region.w,2) + '" height="' + round(region.h,2) +
+      '" color-interpolation-filters="sRGB">' + steps.join('') + '</filter>');
+    filterCache.set(key, id);
+    return id;
+  };
+
+  /* CSS `filter` on an element applies to that element AND its subtree, so it
+     wraps the finished group rather than any single shape. Only the two that
+     actually turn up on graphics are repainted; the colour-matrix functions are
+     still reported rather than faked. */
+  /* `[^)]*` cannot read a filter function, because its argument contains its own
+     parentheses: drop-shadow(rgba(0,0,0,.9) 0 30px 8px) ends at the FIRST `)`,
+     which belongs to rgba. That mis-parse captured a truncated colour, produced
+     no shadow, and left the tail looking like an unsupported filter — so the
+     export lost the shadow AND reported the wrong reason. Count depth instead. */
+  const takeFn = (v, name) => {
+    const re = new RegExp(name.replace('-', '\\-') + '\\(', 'gi');
+    const args = []; let rest = '', i = 0;
+    while (i < v.length) {
+      re.lastIndex = i;
+      const m = re.exec(v);
+      if (!m) { rest += v.slice(i); break; }
+      rest += v.slice(i, m.index);
+      let depth = 1, j = m.index + m[0].length;
+      while (j < v.length && depth) { const ch = v[j++]; if (ch === '(') depth++; else if (ch === ')') depth--; }
+      args.push(v.slice(m.index + m[0].length, j - 1));
+      i = j;
+    }
+    return { args, rest: rest.trim() };
+  };
+
+  const cssFilterFor = (cs, box) => {
+    const v = cs.filter;
+    if (!v || v === 'none') return null;
+    const ds = takeFn(v, 'drop-shadow');
+    const bl = takeFn(ds.rest, 'blur');
+    const drops = [];
+    for (const a of ds.args) drops.push(...shadowList(a, cs.color));
+    const blur = bl.args.length ? Math.max(0, parseFloat(bl.args[0]) || 0) : 0;
+    flag(!!bl.rest, 'a CSS colour filter (brightness, saturate, hue-rotate…) was not repainted');
+    if (!drops.length && !blur) return null;
+    const region = shadowRegion(box, drops.concat(blur ? [{ dx: 0, dy: 0, blur: blur, spread: 0 }] : []));
+    const pre = blur ? '<feGaussianBlur in="SourceGraphic" stdDeviation="' + round(blur / 2, 3) + '" result="blurred"/>' : null;
+    return shadowFilter(drops, region, true, pre);
+  };
 
   /* linear-gradient(<angle|to side>, c1 [pos], c2 [pos], …) — the shape that
      actually turns up in lower thirds. Anything else is reported, not faked. */
@@ -449,8 +622,6 @@ function domToSvg(doc, W, H, fontCss, note){
     const r = node.getBoundingClientRect();
     const painted = r.width > 0.4 && r.height > 0.4;
 
-    flag(cs.boxShadow && cs.boxShadow !== 'none', 'box shadows are not repainted');
-    flag(cs.filter && cs.filter !== 'none', 'CSS filters are not repainted');
     flag(cs.mixBlendMode && cs.mixBlendMode !== 'normal', 'blend modes are not repainted');
     if (cs.transform && cs.transform !== 'none') {
       const mm = /matrix\(([^)]+)\)/.exec(cs.transform);
@@ -462,6 +633,19 @@ function domToSvg(doc, W, H, fontCss, note){
 
     const group = [];
     if (painted) {
+      /* The cast shadow goes down FIRST, as its own pass. This filter emits only
+         the shadows and not SourceGraphic, so the box itself then paints
+         normally on top instead of being blurred along with them. */
+      if (cs.boxShadow && cs.boxShadow !== 'none') {
+        const casts = shadowList(cs.boxShadow, cs.color);
+        const outset = casts.filter(sh => !sh.inset);
+        if (outset.length) {
+          const fid = shadowFilter(outset, shadowRegion(r, outset), false);
+          if (fid) group.push(boxRect(r, '#000', cs, ' filter="url(#' + fid + ')"'));
+        }
+        flag(casts.some(sh => sh.inset), 'an inset box shadow was not repainted');
+      }
+
       const bg = cssColor(cs.backgroundColor);
       if (bg) group.push(boxRect(r, bg.fill, cs, bg.opacity < 1 ? ` fill-opacity="${round(bg.opacity,3)}"` : ''));
 
@@ -506,11 +690,38 @@ function domToSvg(doc, W, H, fontCss, note){
       }
     }
 
-    const kids = [];
-    for (const child of Array.from(node.childNodes)) paint(child, kids);
+    /* Children are painted in STACKING order, not document order.
+
+       A broadcast template positions its plates and its text as siblings and
+       orders them with z-index; emitting in document order therefore painted
+       the backing bars OVER the text and erased it completely. Measured on a
+       live Flowics lower third: three <text> elements written correctly, then
+       five later <rect>s covering them — the export had the bars and no words
+       at all, which reads as "the graphic did not come through".
+
+       Sorting each parent's children by the z-index of positioned children,
+       stable by document order, is what CSS does inside a stacking context and
+       is enough for the layouts these graphics actually use. */
+    const kidParts = [];
+    Array.from(node.childNodes).forEach((child, idx) => {
+      const buf = [];
+      paint(child, buf);
+      if (!buf.length) return;
+      let z = 0;
+      if (child.nodeType === 1) {
+        const ccs = win.getComputedStyle(child);
+        if (ccs.position !== 'static' && ccs.zIndex !== 'auto') z = parseInt(ccs.zIndex, 10) || 0;
+      }
+      kidParts.push({ z, idx, html: buf.join('') });
+    });
+    kidParts.sort((a, b) => a.z - b.z || a.idx - b.idx);
+    const kids = kidParts.map(e => e.html);
     const all = group.concat(kids).join('');
     if (!all) return;
-    out.push(alpha < 1 ? `<g opacity="${round(alpha,3)}">${all}</g>` : all);
+    const fid = cssFilterFor(cs, r);
+    const attrs = (alpha < 1 ? ' opacity="' + round(alpha, 3) + '"' : '') +
+                  (fid ? ' filter="url(#' + fid + ')"' : '');
+    out.push(attrs ? '<g' + attrs + '>' + all + '</g>' : all);
   }
 
   /* Text is emitted line by line, positioned from the browser's own line boxes,
@@ -532,15 +743,24 @@ function domToSvg(doc, W, H, fontCss, note){
       range.setStart(node, i); range.setEnd(node, i + 1);
       const cr = range.getBoundingClientRect();
       if (!cr.width && !cr.height) continue;                 // collapsed whitespace
-      if (!cur || Math.abs(cr.top - cur.top) > 1.5) { cur = { top: cr.top, bottom: cr.bottom, left: cr.left, text: raw[i] }; lines.push(cur); }
-      else { cur.text += raw[i]; cur.bottom = Math.max(cur.bottom, cr.bottom); cur.left = Math.min(cur.left, cr.left); }
+      if (!cur || Math.abs(cr.top - cur.top) > 1.5) { cur = { top: cr.top, bottom: cr.bottom, left: cr.left, right: cr.right, text: raw[i] }; lines.push(cur); }
+      else { cur.text += raw[i]; cur.bottom = Math.max(cur.bottom, cr.bottom); cur.left = Math.min(cur.left, cr.left); cur.right = Math.max(cur.right, cr.right); }
     }
 
     const deco = cs.textDecorationLine || '';
+    /* Inset is meaningless on text, so anything the parser reports as inset is
+       a malformed value rather than a feature to warn about — drop it. */
+    const shad = shadowList(cs.textShadow, cs.color).filter(sh => !sh.inset);
     for (const ln of lines) {
       const t = ln.text.replace(/\s+$/, '');
       if (!t.trim()) continue;
+      /* Per LINE, not per text node: the region is sized off this line's own box,
+         and identical lines share one cached <filter>. */
+      const fid = shad.length ? shadowFilter(shad, shadowRegion(
+        { left: ln.left, top: ln.top, width: Math.max(1, ln.right - ln.left), height: Math.max(1, ln.bottom - ln.top) },
+        shad), true) : null;
       out.push(`<text x="${round(ln.left,2)}" y="${round((ln.top + ln.bottom) / 2,2)}" dominant-baseline="central"` +
+        (fid ? ` filter="url(#${fid})"` : '') +
         ` font-family="${XESC(cs.fontFamily)}" font-size="${round(size,2)}px"` +
         (cs.fontWeight && cs.fontWeight !== '400' ? ` font-weight="${XESC(cs.fontWeight)}"` : '') +
         (cs.fontStyle && cs.fontStyle !== 'normal' ? ` font-style="${XESC(cs.fontStyle)}"` : '') +
@@ -549,7 +769,6 @@ function domToSvg(doc, W, H, fontCss, note){
         ` fill="${col.fill}"${col.opacity < 1 ? ` fill-opacity="${round(col.opacity,3)}"` : ''}` +
         ` xml:space="preserve">${XESC(t)}</text>`);
     }
-    flag(cs.textShadow && cs.textShadow !== 'none', 'text shadows are not repainted');
   }
 
   /* The page's own ground paints only if it is opaque; a template meant for a
@@ -560,7 +779,20 @@ function domToSvg(doc, W, H, fontCss, note){
       if (c) body.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="${c.fill}"` +
         (c.opacity < 1 ? ` fill-opacity="${round(c.opacity,3)}"` : '') + `/>`);
     }
-    for (const child of Array.from(doc.body.childNodes)) paint(child, body);
+    const topParts = [];
+    Array.from(doc.body.childNodes).forEach((child, idx) => {
+      const buf = [];
+      paint(child, buf);
+      if (!buf.length) return;
+      let z = 0;
+      if (child.nodeType === 1) {
+        const ccs = win.getComputedStyle(child);
+        if (ccs.position !== 'static' && ccs.zIndex !== 'auto') z = parseInt(ccs.zIndex, 10) || 0;
+      }
+      topParts.push({ z, idx, html: buf.join('') });
+    });
+    topParts.sort((a, b) => a.z - b.z || a.idx - b.idx);
+    topParts.forEach(e => body.push(e.html));
   }
 
   return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +

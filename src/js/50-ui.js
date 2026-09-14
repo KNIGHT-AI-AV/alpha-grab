@@ -51,6 +51,13 @@ const DEMOS = {
 /* ═══════════════════════════ boot ═══════════════════════════ */
 function boot(){
   loadOpts();
+  /* Simple mode is the product. Anyone carrying a saved `full` from an earlier
+     version is moved across once — after that the toggle is theirs again. */
+  try {
+    if (!localStorage.getItem('alphagrab.simple.v1')) {
+      S.opts.ui = 'simple'; localStorage.setItem('alphagrab.simple.v1', '1'); saveOpts();
+    }
+  } catch (_) { S.opts.ui = S.opts.ui || 'simple'; }
   PROBED = probeCanvasCeiling();
   CEILING = Math.min(PROBED, AG.MAX_DIM);
   const cv = $('#ceilVal');
@@ -67,6 +74,7 @@ function boot(){
   bindLive();
   bindSimple();
   bindIntro();
+  bindSaveDir();
   /* The only JS the rotate prompt needs: a way out for anyone who genuinely
      wants it upright. Whether it SHOWS is CSS's decision, so it can never
      disagree with the actual orientation. */
@@ -400,7 +408,17 @@ async function doRun(reraster){
     try {
       await raf();
       const opts = Object.assign({}, S.opts, { _refW: full.w });
-      S.rawPreview = await rasterise(S.source, pv.w, pv.h, opts, n => toast('Heads up', n, 'err', 12000));
+      /* ONE card, not one per note. A template with a cross-origin font and a
+         cross-origin background image reported three separate red boxes that
+         stacked over the Download button in the corner — the operator's single
+         most important control, hidden by advisories about things that did not
+         stop the export. Gather them and say it once. */
+      const notes = [];
+      S.rawPreview = await rasterise(S.source, pv.w, pv.h, opts, n => notes.push(n));
+      if (notes.length) toast(
+        notes.length === 1 ? 'Heads up' : `Heads up · ${notes.length} things to know`,
+        notes.length === 1 ? notes[0] : '<ul>' + notes.map(n => `<li>${n}</li>`).join('') + '</ul>',
+        'warn', 12000);
     } finally { if (done) done(); }
     if (token !== runToken) return;
   }
@@ -666,7 +684,7 @@ async function exportFrame(){
     const d = await fullFrame();
     const { blob, fmt } = await encodeFrame(d, S.opts.format, S.opts);
     const fn = nameFor(d, fmt.ext);
-    saveBlob(blob, fn);
+    saveBlob(blob, fn, { dir: await saveDirReady(true) });
     toast('Saved', `<code>${fn}</code> · ${d.width} × ${d.height} · ${bytes(blob.size)}`, 'ok');
   } finally { done(); }
 }
@@ -682,9 +700,10 @@ async function exportFillKey(){
       { d: makeFill(d, 'overBlack', S.opts.matteColor), key: 'fill' },
       { d: makeKey(d), key: 'key' }
     ];
+    const dir = await saveDirReady(true);
     for (const p of pair) {
       const { blob, fmt: f } = await encodeFrame(p.d, useFmt, S.opts);
-      saveBlob(blob, nameFor(p.d, f.ext, { key: p.key, name: S.source.name + '_' + p.key }));
+      await saveBlob(blob, nameFor(p.d, f.ext, { key: p.key, name: S.source.name + '_' + p.key }), { dir });
     }
     toast('Saved the pair', `Fill and key at ${d.width} × ${d.height}. The fill is composited over black — that is what a downstream keyer expects.`, 'ok');
   } finally { done(); }
@@ -729,7 +748,7 @@ async function runBatch(){
     const seen = new Set();
     files.forEach(f => { let n = f.name, i = 2; while (seen.has(n)) n = f.name.replace(/(\.[^.]+)$/, `-${i++}$1`); seen.add(n); f.name = n; });
     const zip = await makeZip(files);
-    saveBlob(zip, `alphagrab-batch-${files.length}.zip`);
+    await saveBlob(zip, `alphagrab-batch-${files.length}.zip`, { dir: await saveDirReady(true) });
     toast(failed ? 'Batch finished with failures' : 'Batch finished',
       `${files.length} frame${files.length > 1 ? 's' : ''} zipped${failed ? `, ${failed} failed — see the queue` : ''}. ${bytes(zip.size)}`, failed ? 'err' : 'ok');
   } finally { done(); }
@@ -982,8 +1001,22 @@ function syncLiveView(){
 function fitTile(inst){
   if (!inst.frame || !inst.frame.parentElement) return;
   const view = inst.frame.parentElement;
-  const w = view.clientWidth || 320;
-  const s = w / inst.w;
+  const solo = $('#mv') && $('#mv').classList.contains('solo');
+  let s;
+  if (solo) {
+    /* CONTAIN, both axes. Scaling by width alone put a 16:9 frame's bottom
+       below the fold on any short window — the picture was simply cut off, and
+       the part you lose is the lower third, which is where the graphic is.
+       Fit to whichever axis runs out first and centre what is left. */
+    const box = view.closest('.mv').getBoundingClientRect();
+    const availW = Math.max(80, box.width  - 28);
+    const availH = Math.max(80, box.height - 28);
+    s = Math.min(availW / inst.w, availH / inst.h);
+    view.style.width = Math.round(inst.w * s) + 'px';
+  } else {
+    s = (view.clientWidth || 320) / inst.w;
+    view.style.width = '';
+  }
   inst.frame.style.transform = `scale(${s})`;
   view.style.height = Math.round(inst.h * s) + 'px';
 }
@@ -1209,6 +1242,37 @@ async function refreshSource(announce){
   return same;
 }
 
+/* Label the control with the folder itself. "Downloads" tells the operator
+   where the clips are going; "Save to…" tells them nothing is set yet. */
+function syncSaveDir(){
+  const b = $('#sbFolder');
+  if (!b) return;
+  if (!canPickFolder()) { b.hidden = true; return; }
+  b.hidden = false;
+  b.textContent = saveDir ? saveDir.name : 'Save to…';
+  b.classList.toggle('on', !!saveDir);
+  b.title = saveDir
+    ? `Clips save straight into "${saveDir.name}" with no dialog. Click to change folder.`
+    : 'Choose a folder once and every clip saves straight into it, with no save dialog.';
+}
+
+async function bindSaveDir(){
+  const b = $('#sbFolder');
+  if (!b) return;
+  await loadSaveDir();
+  syncSaveDir();
+  on(b, 'click', async () => {
+    try { await pickSaveDir(); syncSaveDir();
+      toast('Folder set', `Clips now save straight into <b>${XESC(saveDir.name)}</b> — no dialog, no prompt.`, 'ok');
+    }
+    /* AbortError is the operator closing the dialog. SecurityError and
+       NotAllowedError mean the call did not arrive on a user gesture — which
+       a synthetic click does not, so automation trips it every run. None of
+       the three is a fault worth a dialog. */
+    catch (e) { if (e && !/^(AbortError|SecurityError|NotAllowedError)$/.test(e.name)) showError(e); }
+  });
+}
+
 async function downloadClip(){
   if (!S.source) throw new AGError('Nothing to download', 'Grab a URL or open a file first.');
   const btn = $('#sbDownload');
@@ -1222,7 +1286,8 @@ async function downloadClip(){
     const d = await fullFrame();
     const { blob, fmt } = await encodeFrame(d, S.opts.format, S.opts);
     const fn = clipName(fmt.ext, d);
-    saveBlob(blob, fn);
+    const saved = await saveBlob(blob, fn, { dir: await saveDirReady(true) });
+    syncSaveDir();
 
     const was = S.opts.seq;
     S.opts.seq = Math.min(AG.SEQ_MAX, (S.opts.seq | 0) + 1);
@@ -1258,7 +1323,8 @@ async function downloadClip(){
         `Push the next graphic to the URL, then download again.`, 'warn', 7000);
     } else {
       const a = S.stats && S.stats.clearRatio != null ? ` · ${(S.stats.clearRatio * 100).toFixed(0)}% clear` : '';
-      toast('Saved', `<code>${fn}</code> · ${d.width} × ${d.height} · ${bytes(blob.size)}${a}`, 'ok');
+      const w = saved && saved.how === 'folder' ? ` · <b>${XESC(saved.where)}</b>` : '';
+      toast('Saved', `<code>${fn}</code> · ${d.width} × ${d.height} · ${bytes(blob.size)}${a}${w}`, 'ok');
     }
   } finally { done(); btn.disabled = !S.source; }
 }
