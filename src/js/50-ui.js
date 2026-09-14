@@ -1310,7 +1310,19 @@ async function downloadClip(){
   const done = busy('Grabbing the frame…');
   try {
     let same = false;
-    if (S.opts.refetch && S.source.url) same = await refreshSource(false);
+    const inst = liveActive();
+    /* A template that has re-rendered since it mounted is being fed, so the
+       running DOM is already the newest thing there is — re-fetching it costs
+       about five seconds to arrive at the same frame, and rebuilds the monitor
+       out from under the operator on the way. An inert one is re-fetched
+       exactly as before. */
+    const fed = !!(inst && inst.liveEdits > 0);
+    if (S.opts.refetch && S.source.url && !fed) same = await refreshSource(false);
+    else if (fed) {
+      const sig = instSignature(inst);
+      same = !!(S.lastSig && sig && S.lastSig === sig);
+      S.lastSig = sig;
+    }
 
     await raf();
     const d = await fullFrame();

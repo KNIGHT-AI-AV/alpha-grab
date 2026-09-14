@@ -129,12 +129,42 @@ async function mountInstance(inst, host){
     (doc.head || doc.documentElement).append(st);
   } catch (_) {}
 
+  /* Does this template keep ITSELF current?
+
+     Measured against a live Flowics viewer: an instance left running for 75 s
+     picked up a graphic change on air by itself, and its DOM came back
+     byte-identical to a freshly loaded second instance. The page holds a
+     websocket to its own backend and re-renders in place — exactly what the
+     monitor is showing.
+
+     That matters because the download was re-fetching the URL first and paying
+     5 s for it: a network round trip, a fresh iframe, and the full settle
+     window, to arrive at content the running instance already had. Worse, the
+     re-fetch tears the monitor down and rebuilds it, so the frame came from a
+     document the operator had not been watching.
+
+     So count edits. An instance that has re-rendered since mount is proving it
+     is fed, and the live DOM is then the freshest thing available — fresher
+     than a re-fetch, because it is what is on screen. One that has never moved
+     is inert, and gets re-fetched exactly as before. */
+  inst.liveEdits = 0;
+  try {
+    inst.watcher = new MutationObserver(recs => { inst.liveEdits += recs.length; });
+    inst.watcher.observe(doc.body, { subtree: true, childList: true, characterData: true });
+  } catch (_) {}
+
   inst.ready = true;
   inst.scripted = await detectScripted(inst);
+  /* detectScripted deliberately holds and releases the transport, and a
+     template that animates from script mutates while it does. Those are our
+     own edits, not the feed's. */
+  inst.liveEdits = 0;
   return inst;
 }
 
 function disposeInstance(inst){
+  try { inst.watcher && inst.watcher.disconnect(); } catch (_) {}
+  inst.watcher = null;
   try { inst.frame && inst.frame.remove(); } catch (_) {}
   inst.frame = null; inst.ready = false;
   const i = LIVE.list.indexOf(inst);
@@ -275,6 +305,20 @@ function graphicLabel(inst){
   /* The first few words. A strap can run to a full sentence and a filename
      should not. */
   return best.text.split(' ').slice(0, 4).join(' ').slice(0, 44);
+}
+
+/* What the instance is showing, as one short string. Skipping the re-fetch
+   also skipped the byte hash that caught "you downloaded the same graphic
+   twice" — a silent fault, because the export succeeds and the number advances
+   and you only find the duplicates in the edit. The rendered DOM answers the
+   same question and is what the operator actually cares about. */
+function instSignature(inst){
+  const doc = inst && inst.frame && inst.frame.contentDocument;
+  if (!doc || !doc.body) return '';
+  let h = 0x811c9dc5;
+  const feed = (doc.body.textContent || '') + '|' + doc.body.innerHTML.length;
+  for (let i = 0; i < feed.length; i++) { h ^= feed.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(16);
 }
 
 /* ── the grab ──────────────────────────────────────────────────────────── */

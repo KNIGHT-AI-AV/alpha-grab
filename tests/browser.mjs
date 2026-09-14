@@ -385,6 +385,40 @@ is(shadowPx.text > 200, `a text-shadow lands below the glyphs: ${shadowPx.text} 
 is(shadowPx.drop > 200, `a CSS filter drop-shadow lands below its box: ${shadowPx.drop} px`);
 is(shadowPx.filters === 3, `one <filter> per shadowed element, not per line: ${shadowPx.filters}`);
 
+group('a template that feeds itself is not re-fetched');
+/* The download used to re-fetch the URL first, costing ~5 s to arrive at
+   content the running instance already had — and rebuilding the monitor out
+   from under the operator on the way. An instance that has re-rendered since
+   mount is proving it is fed. One that has never moved must still be
+   re-fetched, or a changed file on the server would never be seen. */
+const feeds = await page.evaluate(async () => {
+  const load = async html => {
+    LIVE.list.slice().forEach(i => { if (i.tile) i.tile.remove(); disposeInstance(i); });
+    AG.state.opts.settle = 500; AG.state.opts.domW = 300; AG.state.opts.domH = 120;
+    const src = await loadFromUrl('data:text/html,' + encodeURIComponent(html));
+    src.w = 300; src.h = 120;
+    await setSource(src);
+    return liveActive();
+  };
+  const inert = await load('<body style="margin:0"><div style="font:20px Arial">Static card</div></body>');
+  const inertEdits = inert.liveEdits;
+  const sigA = instSignature(inert);
+
+  const live = await load('<body style="margin:0"><div id="t" style="font:20px Arial">Waiting</div>' +
+    '<script>let k=0;setInterval(()=>{document.getElementById("t").textContent="Update "+(++k)},120)<\/script></body>');
+  await new Promise(r => setTimeout(r, 700));
+  const liveEdits = live.liveEdits;
+  const sig1 = instSignature(live);
+  await new Promise(r => setTimeout(r, 400));
+  const sig2 = instSignature(live);
+  LIVE.list.slice().forEach(i => { if (i.tile) i.tile.remove(); disposeInstance(i); });
+  return { inertEdits, liveEdits, sigA, sig1, sig2 };
+});
+is(feeds.inertEdits === 0, `a static template records no edits, so it still re-fetches: ${feeds.inertEdits}`);
+is(feeds.liveEdits > 0, `a self-feeding template is recognised as fed: ${feeds.liveEdits} edits`);
+is(feeds.sigA && feeds.sig1 && feeds.sigA !== feeds.sig1, 'the signature distinguishes two different graphics');
+is(feeds.sig1 !== feeds.sig2, 'and changes when the graphic changes, so duplicates are still caught');
+
 group('a clip is named after what the graphic says');
 /* A folder of clip_001 … clip_040 cannot be searched. The name is in the DOM
    the repaint already reads, so the filename carries it. The trap guarded here
