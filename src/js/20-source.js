@@ -83,6 +83,19 @@ async function fetchWithFallback(url){
   if (px) {
     try { return { res: await direct(px), via: 'proxy' }; }
     catch (e) { attempts.push(e); }
+  } else if (AG.RELAY) {
+    /* The relay used to be OPT-IN, and that made the tool fail on the exact
+       job it exists for. Measured end to end against the deployed site: paste
+       a Flowics viewer link, press Go live, and nothing happens — the direct
+       fetch is refused by CORS, the relay is never tried because a checkbox in
+       a panel the operator never opens is unticked, and the loop the whole
+       product is built around never starts.
+
+       The host's refusal is not a decision the operator made and not one they
+       can act on. Try the relay, then TELL them it happened — automatic is
+       right, silent is not. */
+    try { return { res: await direct(throughRelay(AG.RELAY, url)), via: 'relay-auto' }; }
+    catch (e) { attempts.push(e); }
   }
 
   const why = await diagnose(url);
@@ -103,6 +116,18 @@ async function fetchWithFallback(url){
 async function loadFromUrl(raw){
   const url = normalizeUrl(raw);
   const { res, via } = await fetchWithFallback(url);
+  if (via === 'relay-auto' && !S.opts.useProxy) {
+    /* Leave the control agreeing with reality. Every download in the loop
+       re-fetches, and without this each one would spend a doomed direct
+       request first — on a live show that latency is real. */
+    S.opts.useProxy = true;
+    try { saveOpts(); } catch (_) {}
+    try { if (typeof syncControls === 'function') syncControls(); } catch (_) {}
+    toast('Fetched through the relay',
+      'That host does not allow a browser on another site to read it, so this went through ' +
+      'a small server we run. Nothing else changes — the graphic is live and the download is ' +
+      'still a full alpha frame. You can switch it off under <b>Full controls</b>.', 'ok', 9000);
+  }
   const ct = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
   const buf = await res.arrayBuffer();
   const src = await classify(buf, ct, url);

@@ -385,6 +385,50 @@ is(shadowPx.text > 200, `a text-shadow lands below the glyphs: ${shadowPx.text} 
 is(shadowPx.drop > 200, `a CSS filter drop-shadow lands below its box: ${shadowPx.drop} px`);
 is(shadowPx.filters === 3, `one <filter> per shadowed element, not per line: ${shadowPx.filters}`);
 
+group('a clip is named after what the graphic says');
+/* A folder of clip_001 … clip_040 cannot be searched. The name is in the DOM
+   the repaint already reads, so the filename carries it. The trap guarded here
+   is icon fonts: Flowics ships three, and a large ligature glyph outscores the
+   person's name while carrying no readable text. */
+const named = await page.evaluate(async () => {
+  const mk = async html => {
+    const src = await loadFromUrl('data:text/html,' + encodeURIComponent(html));
+    src.w = 800; src.h = 300;
+    AG.state.opts.settle = 60; AG.state.opts.sizeMode = 'native';
+    AG.state.opts.domW = 800; AG.state.opts.domH = 300;
+    LIVE.list.slice().forEach(i => { if (i.tile) i.tile.remove(); disposeInstance(i); });
+    await setSource(src);
+    const label = graphicLabel(liveActive());
+    LIVE.list.slice().forEach(i => { if (i.tile) i.tile.remove(); disposeInstance(i); });
+    return label;
+  };
+  return {
+    lower: await mk('<body style="margin:0;width:800px;height:300px">' +
+      '<div style="font:700 60px Arial,sans-serif">Kelly Cheung</div>' +
+      '<div style="font:30px Arial,sans-serif">Practising Law Institute</div></body>'),
+    title: await mk('<body style="margin:0;width:800px;height:300px">' +
+      '<div style="font:700 72px Arial,sans-serif">Opening Keynote</div></body>'),
+    iconFont: await mk('<body style="margin:0;width:800px;height:300px">' +
+      '<div style="font:90px \'flui-icons\',sans-serif">\ue90a\ue90b</div>' +
+      '<div style="font:700 44px Arial,sans-serif">Raheel Hayat</div></body>'),
+    silent: await mk('<body style="margin:0;width:800px;height:300px">' +
+      '<div style="width:200px;height:80px;background:#c8102e"></div></body>')
+  };
+});
+is(named.lower === 'Kelly Cheung', `the biggest line of a lower third wins: "${named.lower}"`);
+is(named.title === 'Opening Keynote', `a title card names itself too: "${named.title}"`);
+is(named.iconFont === 'Raheel Hayat', `a 90px icon glyph does not outrank a 44px name: "${named.iconFont}"`);
+is(named.silent === '', `a graphic with no readable text yields nothing: "${named.silent}"`);
+
+const slug = await page.evaluate(() => [
+  renderTemplate('{text}_{n}', { ext: 'png', n: 7, text: 'Kelly Cheung' }),
+  renderTemplate('{text}_{n}', { ext: 'png', n: 7, text: '' }),
+  renderTemplate('{text}_{n}', { ext: 'png', n: 7, text: 'Señor  O\u2019Brien-Smith!!' })
+]);
+is(slug[0] === 'kelly_cheung_007.png', `the name becomes the filename: ${slug[0]}`);
+is(slug[1] === '007.png', `and an empty label leaves no stray separator: ${slug[1]}`);
+is(/^se_or_o_brien_smith_007\.png$/.test(slug[2]), `punctuation and accents are filed down: ${slug[2]}`);
+
 group('a fade to transparent stays clean');
 /* `transparent` is rgba(0,0,0,0). Interpolating colour and alpha separately
    turns "white to transparent" into "white to black, fading out" — a grey

@@ -704,7 +704,7 @@ body.simple #toasts{bottom:calc(var(--simple-bar-h, 58px) + 14px)}
 
 <!-- ══════════════════════════ top bar ══════════════════════════ -->
 <header class="bar">
-  <div class="brand" title="AlphaGrab v0.5.5">
+  <div class="brand" title="AlphaGrab v0.6.0">
     <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
       <defs><clipPath id="lm"><rect x="2" y="2" width="28" height="28" rx="7"/></clipPath></defs>
       <g clip-path="url(#lm)">
@@ -1068,8 +1068,8 @@ body.simple #toasts{bottom:calc(var(--simple-bar-h, 58px) + 14px)}
     <summary><span class="dot"></span>About<span class="chev">▶</span></summary>
     <div class="pbody">
       <dl class="kv">
-        <dt>Version</dt><dd>0.5.5</dd>
-        <dt>Build</dt><dd>2026-09-14·56a957f4</dd>
+        <dt>Version</dt><dd>0.6.0</dd>
+        <dt>Build</dt><dd>2026-09-14·335e2a47</dd>
         <dt>Canvas limit</dt><dd id="ceilVal">—</dd>
         <dt>Network</dt><dd>fetch only</dd>
       </dl>
@@ -1121,7 +1121,8 @@ body.simple #toasts{bottom:calc(var(--simple-bar-h, 58px) + 14px)}
     </section>
     <section>
       <h3>Filename tokens</h3>
-      <p><code>{name}</code> <code>{w}</code> <code>{h}</code> <code>{ext}</code> <code>{date}</code> <code>{time}</code> <code>{host}</code> <code>{n}</code> <code>{key}</code></p>
+      <p><code>{text}</code> <code>{name}</code> <code>{w}</code> <code>{h}</code> <code>{ext}</code> <code>{date}</code> <code>{time}</code> <code>{host}</code> <code>{n}</code> <code>{key}</code></p>
+      <p class="hint"><code>{text}</code> is the largest line of text on the graphic right now — the name on a lower third, the title on a card. It falls back to <code>clip</code> when there is nothing readable.</p>
     </section>
     <section>
       <h3>Shortcuts</h3>
@@ -1169,8 +1170,8 @@ http.createServer(async (req, res) => {
 'use strict';
 
 const AG = window.AG = {
-  VERSION: '0.5.5',
-  BUILD:   '2026-09-14·56a957f4',
+  VERSION: '0.6.0',
+  BUILD:   '2026-09-14·335e2a47',
 
   /* Advertised limits. tests/guard.mjs pins the marketing copy to these. */
   MAX_DIM: 8192,          // largest side offered by the UI (probe may allow more)
@@ -1299,10 +1300,17 @@ function renderTemplate(tpl, ctx){
     date: `${d.getFullYear()}${p2(d.getMonth()+1)}${p2(d.getDate())}`,
     time: `${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`,
     host: ctx.host || 'local', n: ctx.n == null ? '' : String(ctx.n).padStart(3,'0'),
-    key: ctx.key || ''
+    key: ctx.key || '',
+    /* What the graphic says, as a filename: lowercase, words joined by _,
+       everything a filesystem dislikes removed. Empty when the graphic has no
+       readable text, and the pattern's own separators are tidied afterwards so
+       `{text}_{n}` still yields a clean `001` rather than a leading underscore. */
+    text: String(ctx.text || '').toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 44)
   };
   let out = String(tpl || '{name}_{w}x{h}').replace(/\{(\w+)\}/g, (m, k) => (k in map ? map[k] : m));
-  out = out.replace(/[\\/:*?"<>|]+/g, '-').replace(/-+/g, '-').replace(/^[-_.]+|[-_.]+$/g, '');
+  out = out.replace(/[\\/:*?"<>|]+/g, '-').replace(/-+/g, '-')
+           .replace(/_{2,}/g, '_').replace(/^[-_.]+|[-_.]+$/g, '');
   return (out || 'frame') + '.' + ctx.ext;
 }
 
@@ -1514,7 +1522,7 @@ const S = AG.state = {
        back the same graphic under a new number, which looks exactly like
        working. */
     ui: 'simple',              // simple | full
-    clipName: 'clip_{n}',
+    clipName: '{text}_{n}',
     seq: 1,
     refetch: true,
     /* fetch */
@@ -1623,6 +1631,19 @@ async function fetchWithFallback(url){
   if (px) {
     try { return { res: await direct(px), via: 'proxy' }; }
     catch (e) { attempts.push(e); }
+  } else if (AG.RELAY) {
+    /* The relay used to be OPT-IN, and that made the tool fail on the exact
+       job it exists for. Measured end to end against the deployed site: paste
+       a Flowics viewer link, press Go live, and nothing happens — the direct
+       fetch is refused by CORS, the relay is never tried because a checkbox in
+       a panel the operator never opens is unticked, and the loop the whole
+       product is built around never starts.
+
+       The host's refusal is not a decision the operator made and not one they
+       can act on. Try the relay, then TELL them it happened — automatic is
+       right, silent is not. */
+    try { return { res: await direct(throughRelay(AG.RELAY, url)), via: 'relay-auto' }; }
+    catch (e) { attempts.push(e); }
   }
 
   const why = await diagnose(url);
@@ -1643,6 +1664,18 @@ async function fetchWithFallback(url){
 async function loadFromUrl(raw){
   const url = normalizeUrl(raw);
   const { res, via } = await fetchWithFallback(url);
+  if (via === 'relay-auto' && !S.opts.useProxy) {
+    /* Leave the control agreeing with reality. Every download in the loop
+       re-fetches, and without this each one would spend a doomed direct
+       request first — on a live show that latency is real. */
+    S.opts.useProxy = true;
+    try { saveOpts(); } catch (_) {}
+    try { if (typeof syncControls === 'function') syncControls(); } catch (_) {}
+    toast('Fetched through the relay',
+      'That host does not allow a browser on another site to read it, so this went through ' +
+      'a small server we run. Nothing else changes — the graphic is live and the download is ' +
+      'still a full alpha frame. You can switch it off under <b>Full controls</b>.', 'ok', 9000);
+  }
   const ct = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
   const buf = await res.arrayBuffer();
   const src = await classify(buf, ct, url);
@@ -2673,6 +2706,52 @@ async function detectScripted(inst){
   return a !== b;
 }
 
+/* ── what the graphic SAYS ──────────────────────────────────────────────
+   A folder of clip_001 … clip_040 is a folder nobody can search. The operator
+   knows the file by whose name is on it, and that name is sitting right there
+   in the DOM the repaint already reads — so the filename may as well carry it.
+
+   "Most prominent" is font-size first. A lower third puts the person's name in
+   the largest type on screen and everything else beneath it, and a title card
+   does the same with its title, so one rule covers both without knowing which
+   is which.
+
+   The trap is ICON FONTS. Flowics ships three of them, and a 64px ligature
+   glyph outscores a 60px name while carrying no readable text at all — it
+   would have produced filenames made of private-use codepoints. Anything
+   without two real letters is refused, as is anything in a family named like
+   an icon set. */
+const ICON_FAMILY = /icon|glyph|material|awesome|feather|ionicons/i;
+
+function graphicLabel(inst){
+  const doc = inst && inst.frame && inst.frame.contentDocument;
+  if (!doc || !doc.body) return '';
+  let best = null;
+  const walk = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+    const raw = (node.nodeValue || '').replace(/\s+/g, ' ').trim();
+    /* Two letters, and letters that a person would read. A single glyph, a
+       lone digit or a run of punctuation is furniture, not a label. */
+    if (raw.length < 2 || (raw.match(/[a-z]/gi) || []).length < 2) continue;
+    const parent = node.parentElement;
+    if (!parent) continue;
+    let cs;
+    try { cs = doc.defaultView.getComputedStyle(parent); } catch (_) { continue; }
+    if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) <= 0.02) continue;
+    if (ICON_FAMILY.test(cs.fontFamily || '')) continue;
+    let r;
+    try { const rg = doc.createRange(); rg.selectNodeContents(node); r = rg.getBoundingClientRect(); } catch (_) { continue; }
+    if (r.width < 4 || r.height < 4) continue;
+    const size = parseFloat(cs.fontSize) || 0;
+    if (!best || size > best.size + 0.5 || (Math.abs(size - best.size) <= 0.5 && r.width > best.w))
+      best = { size, w: r.width, text: raw };
+  }
+  if (!best) return '';
+  /* The first few words. A strap can run to a full sentence and a filename
+     should not. */
+  return best.text.split(' ').slice(0, 4).join(' ').slice(0, 44);
+}
+
 /* ── the grab ──────────────────────────────────────────────────────────── */
 
 /* Read the frame the monitor is showing, right now, without disturbing it.
@@ -3311,6 +3390,15 @@ function boot(){
       S.opts.ui = 'simple'; localStorage.setItem('alphagrab.simple.v1', '1'); saveOpts();
     }
   } catch (_) { S.opts.ui = S.opts.ui || 'simple'; }
+  /* Clips are named after what the graphic says now. Anyone still carrying the
+     old `clip_{n}` gets moved across once — but ONLY if they never changed it,
+     because a pattern someone typed themselves is theirs to keep. */
+  try {
+    if (!localStorage.getItem('alphagrab.label.v1')) {
+      if (!S.opts.clipName || S.opts.clipName === 'clip_{n}') S.opts.clipName = '{text}_{n}';
+      localStorage.setItem('alphagrab.label.v1', '1'); saveOpts();
+    }
+  } catch (_) {}
   PROBED = probeCanvasCeiling();
   CEILING = Math.min(PROBED, AG.MAX_DIM);
   const cv = $('#ceilVal');
@@ -3328,6 +3416,7 @@ function boot(){
   bindSimple();
   bindIntro();
   bindSaveDir();
+  watchNextName();
   /* The only JS the rotate prompt needs: a way out for anyone who genuinely
      wants it upright. Whether it SHOWS is CSS's decision, so it can never
      disagree with the actual orientation. */
@@ -4457,11 +4546,31 @@ function setUiMode(mode){
   if (S.source) rerun(true);
 }
 
-const clipName = (ext, d) => renderTemplate(S.opts.clipName || 'clip_{n}', {
+const clipName = (ext, d) => renderTemplate(S.opts.clipName || '{text}_{n}', {
   name: (S.source && S.source.name) || 'clip', w: d ? d.width : S.opts.outW, h: d ? d.height : S.opts.outH,
   ext, n: S.opts.seq,
+  /* Read at the moment the name is built, so it describes the frame being
+     saved rather than whatever was on air when the link was opened. */
+  text: (() => { try { return graphicLabel(liveActive()) || 'clip'; } catch (_) { return 'clip'; } })(),
   host: (() => { try { return new URL(S.source.url).hostname.replace(/^www\./, ''); } catch (_) { return 'local'; } })()
 });
+
+/* The next filename now depends on what is ON AIR, not just on settings, so it
+   goes stale on its own. Re-read it on a slow tick while something is live —
+   the operator has to be able to glance at the bar and see the name they are
+   about to save. */
+let nextTick = null;
+function watchNextName(){
+  if (nextTick) return;
+  nextTick = setInterval(() => {
+    if (!S.source || !liveActive()) return;
+    const n = $('#sbNext');
+    if (!n) return;
+    const fmt = AG.FORMATS.find(f => f.id === S.opts.format) || AG.FORMATS[0];
+    const now = clipName(fmt.ext, null);
+    if (n.textContent !== now) n.textContent = now;
+  }, 900);
+}
 
 function syncSimple(){
   const n = $('#sbNext');

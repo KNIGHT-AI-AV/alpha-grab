@@ -58,6 +58,15 @@ function boot(){
       S.opts.ui = 'simple'; localStorage.setItem('alphagrab.simple.v1', '1'); saveOpts();
     }
   } catch (_) { S.opts.ui = S.opts.ui || 'simple'; }
+  /* Clips are named after what the graphic says now. Anyone still carrying the
+     old `clip_{n}` gets moved across once — but ONLY if they never changed it,
+     because a pattern someone typed themselves is theirs to keep. */
+  try {
+    if (!localStorage.getItem('alphagrab.label.v1')) {
+      if (!S.opts.clipName || S.opts.clipName === 'clip_{n}') S.opts.clipName = '{text}_{n}';
+      localStorage.setItem('alphagrab.label.v1', '1'); saveOpts();
+    }
+  } catch (_) {}
   PROBED = probeCanvasCeiling();
   CEILING = Math.min(PROBED, AG.MAX_DIM);
   const cv = $('#ceilVal');
@@ -75,6 +84,7 @@ function boot(){
   bindSimple();
   bindIntro();
   bindSaveDir();
+  watchNextName();
   /* The only JS the rotate prompt needs: a way out for anyone who genuinely
      wants it upright. Whether it SHOWS is CSS's decision, so it can never
      disagree with the actual orientation. */
@@ -1204,11 +1214,31 @@ function setUiMode(mode){
   if (S.source) rerun(true);
 }
 
-const clipName = (ext, d) => renderTemplate(S.opts.clipName || 'clip_{n}', {
+const clipName = (ext, d) => renderTemplate(S.opts.clipName || '{text}_{n}', {
   name: (S.source && S.source.name) || 'clip', w: d ? d.width : S.opts.outW, h: d ? d.height : S.opts.outH,
   ext, n: S.opts.seq,
+  /* Read at the moment the name is built, so it describes the frame being
+     saved rather than whatever was on air when the link was opened. */
+  text: (() => { try { return graphicLabel(liveActive()) || 'clip'; } catch (_) { return 'clip'; } })(),
   host: (() => { try { return new URL(S.source.url).hostname.replace(/^www\./, ''); } catch (_) { return 'local'; } })()
 });
+
+/* The next filename now depends on what is ON AIR, not just on settings, so it
+   goes stale on its own. Re-read it on a slow tick while something is live —
+   the operator has to be able to glance at the bar and see the name they are
+   about to save. */
+let nextTick = null;
+function watchNextName(){
+  if (nextTick) return;
+  nextTick = setInterval(() => {
+    if (!S.source || !liveActive()) return;
+    const n = $('#sbNext');
+    if (!n) return;
+    const fmt = AG.FORMATS.find(f => f.id === S.opts.format) || AG.FORMATS[0];
+    const now = clipName(fmt.ext, null);
+    if (n.textContent !== now) n.textContent = now;
+  }, 900);
+}
 
 function syncSimple(){
   const n = $('#sbNext');

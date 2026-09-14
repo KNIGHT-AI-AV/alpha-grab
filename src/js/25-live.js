@@ -231,6 +231,52 @@ async function detectScripted(inst){
   return a !== b;
 }
 
+/* ── what the graphic SAYS ──────────────────────────────────────────────
+   A folder of clip_001 … clip_040 is a folder nobody can search. The operator
+   knows the file by whose name is on it, and that name is sitting right there
+   in the DOM the repaint already reads — so the filename may as well carry it.
+
+   "Most prominent" is font-size first. A lower third puts the person's name in
+   the largest type on screen and everything else beneath it, and a title card
+   does the same with its title, so one rule covers both without knowing which
+   is which.
+
+   The trap is ICON FONTS. Flowics ships three of them, and a 64px ligature
+   glyph outscores a 60px name while carrying no readable text at all — it
+   would have produced filenames made of private-use codepoints. Anything
+   without two real letters is refused, as is anything in a family named like
+   an icon set. */
+const ICON_FAMILY = /icon|glyph|material|awesome|feather|ionicons/i;
+
+function graphicLabel(inst){
+  const doc = inst && inst.frame && inst.frame.contentDocument;
+  if (!doc || !doc.body) return '';
+  let best = null;
+  const walk = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+    const raw = (node.nodeValue || '').replace(/\s+/g, ' ').trim();
+    /* Two letters, and letters that a person would read. A single glyph, a
+       lone digit or a run of punctuation is furniture, not a label. */
+    if (raw.length < 2 || (raw.match(/[a-z]/gi) || []).length < 2) continue;
+    const parent = node.parentElement;
+    if (!parent) continue;
+    let cs;
+    try { cs = doc.defaultView.getComputedStyle(parent); } catch (_) { continue; }
+    if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) <= 0.02) continue;
+    if (ICON_FAMILY.test(cs.fontFamily || '')) continue;
+    let r;
+    try { const rg = doc.createRange(); rg.selectNodeContents(node); r = rg.getBoundingClientRect(); } catch (_) { continue; }
+    if (r.width < 4 || r.height < 4) continue;
+    const size = parseFloat(cs.fontSize) || 0;
+    if (!best || size > best.size + 0.5 || (Math.abs(size - best.size) <= 0.5 && r.width > best.w))
+      best = { size, w: r.width, text: raw };
+  }
+  if (!best) return '';
+  /* The first few words. A strap can run to a full sentence and a filename
+     should not. */
+  return best.text.split(' ').slice(0, 4).join(' ').slice(0, 44);
+}
+
 /* ── the grab ──────────────────────────────────────────────────────────── */
 
 /* Read the frame the monitor is showing, right now, without disturbing it.

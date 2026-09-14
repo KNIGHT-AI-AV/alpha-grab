@@ -135,10 +135,17 @@ function renderTemplate(tpl, ctx){
     date: `${d.getFullYear()}${p2(d.getMonth()+1)}${p2(d.getDate())}`,
     time: `${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`,
     host: ctx.host || 'local', n: ctx.n == null ? '' : String(ctx.n).padStart(3,'0'),
-    key: ctx.key || ''
+    key: ctx.key || '',
+    /* What the graphic says, as a filename: lowercase, words joined by _,
+       everything a filesystem dislikes removed. Empty when the graphic has no
+       readable text, and the pattern's own separators are tidied afterwards so
+       `{text}_{n}` still yields a clean `001` rather than a leading underscore. */
+    text: String(ctx.text || '').toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 44)
   };
   let out = String(tpl || '{name}_{w}x{h}').replace(/\{(\w+)\}/g, (m, k) => (k in map ? map[k] : m));
-  out = out.replace(/[\\/:*?"<>|]+/g, '-').replace(/-+/g, '-').replace(/^[-_.]+|[-_.]+$/g, '');
+  out = out.replace(/[\\/:*?"<>|]+/g, '-').replace(/-+/g, '-')
+           .replace(/_{2,}/g, '_').replace(/^[-_.]+|[-_.]+$/g, '');
   return (out || 'frame') + '.' + ctx.ext;
 }
 
@@ -350,7 +357,7 @@ const S = AG.state = {
        back the same graphic under a new number, which looks exactly like
        working. */
     ui: 'simple',              // simple | full
-    clipName: 'clip_{n}',
+    clipName: '{text}_{n}',
     seq: 1,
     refetch: true,
     /* fetch */
