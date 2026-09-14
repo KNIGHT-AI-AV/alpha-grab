@@ -862,6 +862,17 @@ is(introRun.slides === 5, `it is ${introRun.slides} panels, not more`);
 is(introRun.first === '1' && introRun.lastBtn === 'Start', 'it starts at one and ends with Start');
 is(introRun.hidden && introRun.seen, 'skipping closes it and it is remembered');
 
+/* The mark holds the screen for ~2.4 s. Dismissing during that window must
+   actually stick — firing the panels blind put them over work already underway. */
+const raced = await page.evaluate(async () => {
+  try { localStorage.setItem('alphagrab.intro.v1', '1'); } catch (_) {}
+  const before = document.querySelector('#intro').hidden;
+  introShow(1); introDone();
+  await new Promise(r => setTimeout(r, 120));
+  return { before, after: document.querySelector('#intro').hidden };
+});
+is(raced.after, 'and a dismissal during the opening is not undone by its own timer');
+
 group('no errors accumulated across the whole run');
 is(errors.length === 0, 'still no console or page errors', errors.slice(0, 3).join(' | '));
 

@@ -662,7 +662,7 @@ body.simple #mv.solo .inst.parked{position:absolute;left:-99999px;top:0;width:64
 
 <!-- ══════════════════════════ top bar ══════════════════════════ -->
 <header class="bar">
-  <div class="brand" title="AlphaGrab v0.4.0">
+  <div class="brand" title="AlphaGrab v0.4.1">
     <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
       <defs><clipPath id="lm"><rect x="2" y="2" width="28" height="28" rx="7"/></clipPath></defs>
       <g clip-path="url(#lm)">
@@ -1025,8 +1025,8 @@ body.simple #mv.solo .inst.parked{position:absolute;left:-99999px;top:0;width:64
     <summary><span class="dot"></span>About<span class="chev">▶</span></summary>
     <div class="pbody">
       <dl class="kv">
-        <dt>Version</dt><dd>0.4.0</dd>
-        <dt>Build</dt><dd>2026-09-14·f357d17b</dd>
+        <dt>Version</dt><dd>0.4.1</dd>
+        <dt>Build</dt><dd>2026-09-14·a5651515</dd>
         <dt>Canvas limit</dt><dd id="ceilVal">—</dd>
         <dt>Network</dt><dd>fetch only</dd>
       </dl>
@@ -1126,8 +1126,8 @@ http.createServer(async (req, res) => {
 'use strict';
 
 const AG = window.AG = {
-  VERSION: '0.4.0',
-  BUILD:   '2026-09-14·f357d17b',
+  VERSION: '0.4.1',
+  BUILD:   '2026-09-14·a5651515',
 
   /* Advertised limits. tests/guard.mjs pins the marketing copy to these. */
   MAX_DIM: 8192,          // largest side offered by the UI (probe may allow more)
@@ -4106,7 +4106,13 @@ function bindIntro(){
   if (introSeen()) return;
   const sp = $('#splash');
   sp.hidden = false;
-  setTimeout(() => { sp.remove(); introShow(1); }, 2400);
+  /* Re-check on the way in. The mark holds the screen for a couple of seconds,
+     and anything can happen in that time — a dismissal, a permalink loading a
+     source. Firing blind meant the panels appeared over work already underway. */
+  setTimeout(() => {
+    sp.remove();
+    if (!introSeen()) introShow(1);
+  }, 2400);
 }
 
 /* go */

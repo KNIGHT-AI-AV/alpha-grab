@@ -1,5 +1,11 @@
 # AlphaGrab changelog
 
+## 0.4.1 - 2026-09-14
+
+- The opening's timer fired blind. The mark holds the screen for ~2.4 s, and
+  whatever happened in that window - a dismissal, a permalink loading a source -
+  was overwritten when the panels appeared anyway. It re-checks on the way in.
+
 ## 0.4.0 - 2026-09-14
 
 **It is a live feed now, not a still.**

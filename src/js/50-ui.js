@@ -1309,7 +1309,13 @@ function bindIntro(){
   if (introSeen()) return;
   const sp = $('#splash');
   sp.hidden = false;
-  setTimeout(() => { sp.remove(); introShow(1); }, 2400);
+  /* Re-check on the way in. The mark holds the screen for a couple of seconds,
+     and anything can happen in that time — a dismissal, a permalink loading a
+     source. Firing blind meant the panels appeared over work already underway. */
+  setTimeout(() => {
+    sp.remove();
+    if (!introSeen()) introShow(1);
+  }, 2400);
 }
 
 /* go */
